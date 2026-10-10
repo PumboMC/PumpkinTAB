@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+*.wasm
+
+# Harness output. tools/smoke.txt is the command file and is tracked;
+# *.out*.txt is what a run produced and is not.
+tools/*.out*.txt
+
+# Made by the server on its first start; each machine keeps its own.
+/nethernet-key.der
+/data/.pumpkin/
+/logs/
