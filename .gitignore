@@ -8,3 +8,8 @@ tools/*.out*.txt
 
 # Local audit write-up, not part of the release.
 API-AUDIT.md
+
+# Made by the server on its first start; each machine keeps its own.
+/nethernet-key.der
+/data/.pumpkin/
+/logs/
