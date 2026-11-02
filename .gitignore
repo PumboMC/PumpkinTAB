@@ -5,3 +5,6 @@
 # Harness output. tools/smoke.txt is the command file and is tracked;
 # *.out*.txt is what a run produced and is not.
 tools/*.out*.txt
+
+# Local audit write-up, not part of the release.
+API-AUDIT.md
