@@ -40,14 +40,9 @@
 //! `on_load` and from a *successful* reload. This module only remembers which task
 //! is live, in a [`Refresh`], so that it can be cancelled exactly once.
 //!
-//! ## What is deliberately not in here
-//!
-//! Nothing per-player. A [`Snapshot`] is cloned once per refresh and walked once
-//! per player, so a field keyed by player - anything that would have to be
-//! updated as each row is pushed - turns a once-a-second clone into a
-//! once-a-second copy of every player who ever joined. The rows themselves are
-//! built and thrown away in [`crate::tab::refresh_all`]; what outlives a refresh
-//! is only what the host holds on our behalf.
+//! The scoreboard handles are per player. Their presence records which player's
+//! objective has been initialized; it must not be inferred from another board.
+//! Rendered rows themselves are rebuilt by [`crate::tab::refresh_all`].
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -150,11 +145,8 @@ pub fn install(config: Config) {
     with_bar(|bar| bar.remove_all());
     *recover(BAR.lock()) = None;
 
-    // The sidebar handles go too, or a reload would never notice a changed title
-    // or a changed `disabled-worlds`. Dropping a handle leaks its resource-table
-    // entry, which is why this only happens on load and on an explicit reload
-    // rather than per refresh.
-    *recover(BOARDS.lock()) = BTreeMap::new();
+    // Keep the handles on reload: their player-specific objectives still exist
+    // and are needed both for updates and for disabling the sidebar.
 
     let mut slot = recover(config_slot().lock());
     *slot = Some(Arc::new(config));
@@ -180,23 +172,6 @@ pub fn config() -> Option<Arc<Config>> {
 
 /// The sidebar teams that exist.
 static TEAMS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
-
-/// Whether the sidebar objective is on the board.
-///
-/// Tracked rather than asked, because the WIT has no getter for an objective. It
-/// is what lets a reload `update_objective` in place instead of removing and
-/// re-adding, which would blink the sidebar out for every connected client.
-static OBJECTIVE_EXISTS: Mutex<bool> = Mutex::new(false);
-
-/// Whether the objective is currently on the board.
-pub fn objective_exists() -> bool {
-    *recover(OBJECTIVE_EXISTS.lock())
-}
-
-/// Records that the objective is on the board.
-pub fn set_objective_exists(exists: bool) {
-    *recover(OBJECTIVE_EXISTS.lock()) = exists;
-}
 
 /// How many `lines:` were in use when the sidebar was last built.
 static LINE_COUNT: Mutex<usize> = Mutex::new(0);

@@ -100,10 +100,8 @@ impl CommandHandler for Reload {
         }
 
         // The snapshot has to be taken *after* `ensure_assets`, not before.
-        // `install` dropped every sidebar handle, and `ensure_assets` is what
-        // builds the new ones; a snapshot from before it lists no worlds, so the
-        // refresh that follows writes to nothing and the edit appears not to have
-        // taken until the next tick.
+        // `ensure_assets` may add or remove player boards; refresh with the
+        // resulting set rather than the earlier snapshot.
         let snapshot = match state::snapshot() {
             Some(snapshot) => snapshot,
             None => return soft_error(&sender, "PumpkinTAB has no state after reloading."),
