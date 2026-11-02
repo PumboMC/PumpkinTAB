@@ -258,8 +258,7 @@ fn ensure_bar(snapshot: &state::Snapshot, server: &Server) {
 /// player. That is what lets a line resolve `%perm_prefix%` or `%player%`
 /// against the reader instead of against nobody.
 ///
-/// The teams and the objective are the same *names* on every board, so one build
-/// tells us they exist and the rest follow the same shape.
+/// Objective existence is per player, even though every board uses the same name.
 fn ensure_scoreboard(snapshot: &state::Snapshot, server: &Server) {
     if !snapshot.config.scoreboard.enabled {
         // Turning the sidebar off has to take it off the board. Nothing else ever
@@ -278,7 +277,6 @@ fn ensure_scoreboard(snapshot: &state::Snapshot, server: &Server) {
                 board.remove_objective(scoreboard::OBJECTIVE);
                 info!("the sidebar is disabled; the objective was removed for {player}");
             }
-            state::set_objective_exists(false);
             state::set_line_count(0);
         }
         return;
@@ -296,7 +294,6 @@ fn ensure_scoreboard(snapshot: &state::Snapshot, server: &Server) {
     // Read before it is overwritten: the previous line count is what lets a reload
     // that shortened `lines:` remove the rows the old config left behind.
     let previous_lines = state::line_count();
-    let mut objective_exists = state::objective_exists();
     let mut teams = BTreeSet::new();
     let line_count = snapshot.config.scoreboard.lines.len();
 
@@ -314,19 +311,22 @@ fn ensure_scoreboard(snapshot: &state::Snapshot, server: &Server) {
             debug!("{name} is not a Java player; the sidebar is skipped for them");
             continue;
         };
-        let handle = java.get_scoreboard();
-        let made = scoreboard::create(
-            &handle,
-            &snapshot.config.scoreboard,
-            &view,
-            previous_lines,
-            objective_exists,
-        );
+        let made = if snapshot.owns_player(&name) {
+            state::with_scoreboard(&name, |handle| {
+                scoreboard::create(
+                    handle, &snapshot.config.scoreboard, &view, previous_lines, true,
+                )
+            })
+        } else {
+            let handle = java.get_scoreboard();
+            let made = scoreboard::create(&handle, &snapshot.config.scoreboard, &view, 0, false);
+            state::insert_scoreboard(name.clone(), handle);
+            Some(made)
+        };
+        let Some(made) = made else { continue };
         if teams.is_empty() {
             teams = made.teams;
         }
-        objective_exists = made.objective_exists;
-        state::insert_scoreboard(name.clone(), handle);
     }
 
     if teams.is_empty() {
@@ -341,7 +341,6 @@ fn ensure_scoreboard(snapshot: &state::Snapshot, server: &Server) {
     }
     state::set_teams(teams);
     state::set_line_count(line_count);
-    state::set_objective_exists(objective_exists);
 }
 
 /// Runs the refresh once. The body of the loop armed by [`restart_refresh`].
@@ -364,7 +363,9 @@ fn tick(server: Server) {
         return;
     };
     ensure_assets(&snapshot, &server);
-    tab::refresh_all(&server, &snapshot);
+    if let Some(snapshot) = state::snapshot() {
+        tab::refresh_all(&server, &snapshot);
+    }
 }
 
 /// One player's refresh, immediately rather than on the next tick.
@@ -373,7 +374,9 @@ fn apply(server: &Server, player: &Player) {
         return;
     };
     ensure_assets(&snapshot, server);
-    tab::apply_player(server, &snapshot, player);
+    if let Some(snapshot) = state::snapshot() {
+        tab::apply_player(server, &snapshot, player);
+    }
 }
 
 /// The expansion plugin. Holds no state of its own; the globals it would keep are
