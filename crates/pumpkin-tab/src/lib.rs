@@ -566,6 +566,7 @@ impl pumpkin_plugin_api::EventHandler<PlayerJoinEvent> for OnJoin {
         server: Server,
         event: EventData<PlayerJoinEvent>,
     ) -> EventData<PlayerJoinEvent> {
+        tab::drop_stale_bar_member(&server, &event.player);
         apply(&server, &event.player);
         event
     }

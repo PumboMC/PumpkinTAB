@@ -443,6 +443,24 @@ fn push_sideboard(
     });
 }
 
+/// Takes a joining player off the bar if the host still lists them.
+///
+/// The host keeps bar members by UUID and nothing takes a player off when they
+/// leave, so somebody who comes back is still listed. `add-player` skips a listed
+/// UUID, and their client, which forgot the bar on disconnect, would never get it
+/// again. Taking them off here lets the next refresh add them as new, which is
+/// what sends the bar. `remove-player` takes the player by value, so it gets a
+/// handle of its own.
+pub fn drop_stale_bar_member(server: &Server, player: &Player) {
+    let name = player.get_name();
+    state::with_bar(|bar| {
+        let listed = bar.get_players().iter().any(|seen| seen.get_name() == name);
+        if listed && let Some(handle) = server.get_player_by_name(&name) {
+            bar.remove_player(handle);
+        }
+    });
+}
+
 /// Takes a departing player's sidebar away.
 ///
 /// Their whole board goes, not just their row: the board belongs to them, and it is
