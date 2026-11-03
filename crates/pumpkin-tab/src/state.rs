@@ -84,9 +84,7 @@ fn config_slot() -> &'static Mutex<Option<Arc<Config>>> {
 /// reason this plugin has no `catch_unwind` anywhere.
 ///
 /// `pub(crate)` so the same reasoning is written once rather than twice that drift.
-pub(crate) fn recover<T>(
-    result: std::sync::LockResult<MutexGuard<'_, T>>,
-) -> MutexGuard<'_, T> {
+pub(crate) fn recover<T>(result: std::sync::LockResult<MutexGuard<'_, T>>) -> MutexGuard<'_, T> {
     match result {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
@@ -252,6 +250,11 @@ pub fn take_refresh() -> Option<u32> {
 /// Installs the bar.
 pub fn set_bar(bar: BossBar) {
     *recover(BAR.lock()) = Some(bar);
+}
+
+/// Whether a shared bossbar already exists.
+pub fn has_bar() -> bool {
+    recover(BAR.lock()).is_some()
 }
 
 /// Takes the sidebar handles out, for a teardown that has to write to each one

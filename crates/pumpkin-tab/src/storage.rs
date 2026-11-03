@@ -101,9 +101,11 @@ mod tests {
         let loaded = load(folder.to_str().expect("a path"));
         assert!(loaded.created, "the file did not exist, so it is created");
         assert_eq!(loaded.error, None);
-        assert!(Path::new(folder.to_str().expect("a path"))
-            .join(CONFIG_FILE)
-            .exists());
+        assert!(
+            Path::new(folder.to_str().expect("a path"))
+                .join(CONFIG_FILE)
+                .exists()
+        );
 
         let _ = std::fs::remove_dir_all(&folder);
     }
@@ -127,7 +129,10 @@ mod tests {
 
         let loaded = load(folder.to_str().expect("a path"));
         assert!(
-            loaded.error.as_deref().is_some_and(|e| e.contains("nonsense")),
+            loaded
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("nonsense")),
             "{:?}",
             loaded.error
         );

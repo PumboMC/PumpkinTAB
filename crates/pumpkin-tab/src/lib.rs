@@ -92,16 +92,16 @@
 //! `pumpkin-plugin-api` WIT, and **the version number cannot be used to check**:
 //! Pumpkin kept `0.2.0+26.3-26.51` across a WIT change. A mismatch shows as
 //! `type-checking export func 'handle-event'` and nothing else. This build is
-//! pinned to Pumpkin `0.2.0+26.3-26.51`, commit
-//! `204a94ed895f041a845630d5a23c094705a0704e`, plugin WIT
-//! `e0bb97ea48d9857c181356ba14964d47b20d0f56`.
+//! pinned to Pumpkin `0.2.1+26.3-26.51`, commit
+//! `224f9f8144ca53a8d0800acb87607d714196e2a6`, plugin WIT
+//! `5aeec84177a489e920a22532e5aff2b5f9279c1b`.
 
 use std::{collections::BTreeSet, sync::OnceLock};
 
 use pumpkin_plugin_api::{
     Context, Plugin, PluginMetadata, Result, Server,
-    permission::PermissionDefault,
     events::{EventData, EventPriority, PlayerJoinEvent, PlayerLeaveEvent},
+    permission::PermissionDefault,
     player::Player,
 };
 use tracing::{debug, error, info, warn};
@@ -109,18 +109,18 @@ use tracing::{debug, error, info, warn};
 #[cfg(target_arch = "wasm32")]
 use pumpkin_plugin_api::register_plugin;
 
+/// The shared bossbar.
+pub mod bossbar;
 /// Command registration and the handlers behind it.
 pub mod commands;
 /// The configuration and its models.
 pub mod config;
 /// Which group a player is shown as.
 pub mod groups;
-/// The shared bossbar.
-pub mod bossbar;
-/// Placeholder resolution.
-pub mod render;
 /// Asking PumpkinPIE for whatever the built-ins could not answer.
 pub mod pie;
+/// Placeholder resolution.
+pub mod render;
 /// The sidebar.
 pub mod scoreboard;
 /// The plugin's state.
@@ -179,10 +179,7 @@ pub fn reload() -> Option<(bool, Vec<String>)> {
         restart_refresh(refresh);
         return Some((true, Vec::new()));
     };
-    Some((
-        false,
-        vec![format!("{}: {problem}", config::CONFIG_FILE)],
-    ))
+    Some((false, vec![format!("{}: {problem}", config::CONFIG_FILE)]))
 }
 
 /// Cancels the live refresh and arms a new one every `ticks` ticks.
@@ -229,14 +226,14 @@ pub fn ensure_assets(snapshot: &state::Snapshot, server: &Server) {
 
 /// The bar, created once and then kept.
 fn ensure_bar(snapshot: &state::Snapshot, server: &Server) {
-    if !snapshot.config.bossbar.enabled {
+    if !snapshot.config.bossbar.enabled || state::has_bar() {
         return;
     }
     // A view with no player: the bar has one title for everybody.
     let view = render::View {
         config: &snapshot.config,
         clock: snapshot.clock,
-        server,
+        server: Some(server),
         player: None,
         group: None,
     };
@@ -266,15 +263,7 @@ fn ensure_scoreboard(snapshot: &state::Snapshot, server: &Server) {
         // `enabled: false` would leave the last sidebar frozen on every client.
         if let Some(handles) = state::take_scoreboards() {
             for (player, board) in handles {
-                for index in 0..state::line_count() {
-                    board.remove_score(&scoreboard::line_key(index), scoreboard::OBJECTIVE);
-                    board.remove_team(&scoreboard::line_team(index));
-                }
-                for team in state::teams() {
-                    board.remove_team(&team);
-                }
-                board.clear_display_slot(pumpkin_plugin_api::scoreboard::DisplaySlot::Sidebar);
-                board.remove_objective(scoreboard::OBJECTIVE);
+                remove_sidebar(&board);
                 info!("the sidebar is disabled; the objective was removed for {player}");
             }
             state::set_line_count(0);
@@ -287,7 +276,7 @@ fn ensure_scoreboard(snapshot: &state::Snapshot, server: &Server) {
     let view = render::View {
         config: &snapshot.config,
         clock: snapshot.clock,
-        server,
+        server: Some(server),
         player: None,
         group: None,
     };
@@ -304,6 +293,8 @@ fn ensure_scoreboard(snapshot: &state::Snapshot, server: &Server) {
         // scoreboard API, which Bedrock has a separate and smaller version of.
 
         if !snapshot.config.scoreboard.applies_in(&world) {
+            state::with_scoreboard(&name, remove_sidebar);
+            state::forget_player(&name);
             debug!("{name} is in world '{world}', which is under scoreboard.disabled-worlds");
             continue;
         }
@@ -314,7 +305,11 @@ fn ensure_scoreboard(snapshot: &state::Snapshot, server: &Server) {
         let made = if snapshot.owns_player(&name) {
             state::with_scoreboard(&name, |handle| {
                 scoreboard::create(
-                    handle, &snapshot.config.scoreboard, &view, previous_lines, true,
+                    handle,
+                    &snapshot.config.scoreboard,
+                    &view,
+                    previous_lines,
+                    true,
                 )
             })
         } else {
@@ -341,6 +336,18 @@ fn ensure_scoreboard(snapshot: &state::Snapshot, server: &Server) {
     }
     state::set_teams(teams);
     state::set_line_count(line_count);
+}
+
+fn remove_sidebar(board: &pumpkin_plugin_api::scoreboard::Scoreboard) {
+    for index in 0..state::line_count() {
+        board.remove_score(&scoreboard::line_key(index), scoreboard::OBJECTIVE);
+        board.remove_team(&scoreboard::line_team(index));
+    }
+    for team in state::teams() {
+        board.remove_team(&team);
+    }
+    board.clear_display_slot(pumpkin_plugin_api::scoreboard::DisplaySlot::Sidebar);
+    board.remove_objective(scoreboard::OBJECTIVE);
 }
 
 /// Runs the refresh once. The body of the loop armed by [`restart_refresh`].
@@ -454,8 +461,16 @@ impl Plugin for PumpkinTAB {
 
         // Join is blocking so the tab list is right before the player sees it;
         // leave is not, because nothing needs to be in place afterwards.
-        context.register_event_handler::<PlayerJoinEvent, _>(OnJoin, EventPriority::Normal, true)?;
-        context.register_event_handler::<PlayerLeaveEvent, _>(OnLeave, EventPriority::Low, false)?;
+        context.register_event_handler::<PlayerJoinEvent, _>(
+            OnJoin,
+            EventPriority::Normal,
+            true,
+        )?;
+        context.register_event_handler::<PlayerLeaveEvent, _>(
+            OnLeave,
+            EventPriority::Low,
+            false,
+        )?;
 
         // The refresh loop. Twenty ticks is one second and is the floor the config
         // can ask for; every setter here broadcasts to the world, so a faster
@@ -546,7 +561,12 @@ fn operator_default() -> PermissionDefault {
 struct OnJoin;
 
 impl pumpkin_plugin_api::EventHandler<PlayerJoinEvent> for OnJoin {
-    fn handle(&self, server: Server, event: EventData<PlayerJoinEvent>) -> EventData<PlayerJoinEvent> {
+    fn handle(
+        &self,
+        server: Server,
+        event: EventData<PlayerJoinEvent>,
+    ) -> EventData<PlayerJoinEvent> {
+        tab::drop_stale_bar_member(&server, &event.player);
         apply(&server, &event.player);
         event
     }

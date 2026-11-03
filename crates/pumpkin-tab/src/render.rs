@@ -99,11 +99,13 @@
 //!
 //! ## Recursion
 //!
-//! Frames and conditions resolve as templates, so resolution can nest. It is
-//! bounded at [`MAX_DEPTH`] rather than left open: an animation whose frame is
-//! itself `%animation:itself%` is a config mistake, and an unbounded walk over it
-//! inside a once-a-second refresh is a hang. [`MAX_DEPTH`] is also how many
-//! conditions may chain, which covers TAB's own two-level ping example.
+//! Frames and conditions resolve as templates, so resolution can nest, and a
+//! condition's own expressions can read other conditions and animations. A
+//! [`Path`] carries the names a resolution is inside: a name that is already on it
+//! is a cycle and stays as written, because an animation whose frame is itself
+//! `%animation:itself%` is a config mistake and an unbounded walk over it inside a
+//! once-a-second refresh is a hang. Anything else may nest up to [`MAX_DEPTH`]
+//! levels, whether it is reached directly, from a frame or from another condition.
 
 use std::collections::BTreeMap;
 
@@ -130,12 +132,39 @@ pub const MAX_TPS: f64 = 20.0;
 /// The prefix that marks a conditional reference.
 pub const CONDITION_PREFIX: &str = "condition:";
 
-/// How deep a frame or a condition may nest before resolution gives up.
+/// How many frames and conditions may nest inside each other.
 ///
-/// Two is enough for the real cases: a frame containing a built-in, a frame
-/// containing another animation, and a condition whose `false:` text is a second
-/// condition, which is how TAB's own ping-colouring example is written.
-pub const MAX_DEPTH: u8 = 2;
+/// Cycles are caught by name on the [`Path`]; this only bounds what a config that
+/// nests deep without a cycle can cost per refresh. A frame showing a condition
+/// that reads another condition, whose `false:` text is a third, is four levels.
+pub const MAX_DEPTH: u8 = 8;
+
+/// The animations and conditions one resolution is inside, innermost first.
+#[derive(Clone, Copy, Default)]
+pub struct Path<'a> {
+    /// The reference as written, prefix included; empty at the root.
+    name: &'a str,
+    parent: Option<&'a Path<'a>>,
+    depth: u8,
+}
+
+impl Path<'_> {
+    /// `name` one level in, or [`None`] for a cycle or a chain past [`MAX_DEPTH`].
+    fn enter<'b>(&'b self, name: &'b str) -> Option<Path<'b>> {
+        let mut at = Some(self);
+        while let Some(path) = at {
+            if path.name == name {
+                return None;
+            }
+            at = path.parent;
+        }
+        (self.depth < MAX_DEPTH).then_some(Path {
+            name,
+            parent: Some(self),
+            depth: self.depth + 1,
+        })
+    }
+}
 
 /// The built-in placeholders, and the name each is written as in a config.
 ///
@@ -143,8 +172,22 @@ pub const MAX_DEPTH: u8 = 2;
 /// answers, and [`BUILT_IN_ALIASES`] are in it because an alias answers just as
 /// much as a first-class name does.
 pub const BUILT_INS: [&str; 17] = [
-    "player", "viewer", "ping", "world", "uuid", "permission_level", "health", "gamemode",
-    "player_ip", "bedrock", "group", "online", "max_players", "worldonline", "server_name", "tps",
+    "player",
+    "viewer",
+    "ping",
+    "world",
+    "uuid",
+    "permission_level",
+    "health",
+    "gamemode",
+    "player_ip",
+    "bedrock",
+    "group",
+    "online",
+    "max_players",
+    "worldonline",
+    "server_name",
+    "tps",
     "mspt",
 ];
 
@@ -200,8 +243,8 @@ pub struct View<'a> {
     /// The clock animations read.
     pub clock: Clock,
 
-    /// The server, for the global values.
-    pub server: &'a Server,
+    /// The server for global values; absent when rendering without a host.
+    pub server: Option<&'a Server>,
 
     /// Whose entry is being built, if any.
     ///
@@ -221,30 +264,31 @@ pub struct View<'a> {
 impl View<'_> {
     /// Resolves one placeholder name, or [`None`] to leave it as written.
     pub fn resolve(&self, name: &str) -> Option<String> {
-        self.resolve_at(name, MAX_DEPTH)
+        self.resolve_in(name, &Path::default())
     }
 
-    /// As [`Self::resolve`], with the depth budget carried through.
+    /// As [`Self::resolve`], inside the frames and conditions on `path`.
     ///
-    /// [`pub`] because a condition's `true:` / `false:` text is a template that
-    /// goes round the resolver again, one level shallower than the condition
-    /// itself. That is the whole recursion guard for conditions.
+    /// An animation or condition reference enters the path before it is resolved,
+    /// so one that is already on it, through a frame, an expression or a `true:` /
+    /// `false:` text, is a cycle and stays as written.
     ///
     /// Order matters, and is the order the module header documents: an animation,
     /// then a condition, then the built-ins. A name can claim only one prefix, and
     /// neither prefix is a legal built-in, so the three can never collide - which
     /// the two `*_prefix_is_not_a_built_in` tests hold rather than leave to
     /// inspection.
-    pub fn resolve_at(&self, name: &str, depth: u8) -> Option<String> {
-        if let Some(name) = name.strip_prefix(ANIMATION_PREFIX) {
-            return self.frame(name, depth);
+    pub fn resolve_in(&self, name: &str, path: &Path<'_>) -> Option<String> {
+        if let Some(animation) = name.strip_prefix(ANIMATION_PREFIX) {
+            return self.frame(animation, &path.enter(name)?);
         }
-        if let Some(name) = name.strip_prefix(CONDITION_PREFIX) {
+        if let Some(condition) = name.strip_prefix(CONDITION_PREFIX) {
+            let path = path.enter(name)?;
             return self
                 .config
                 .conditions
-                .get(name)
-                .and_then(|condition| condition.resolve(self, depth));
+                .get(condition)
+                .and_then(|condition| condition.resolve(self, &path));
         }
         self.built_in(name)
     }
@@ -254,14 +298,16 @@ impl View<'_> {
     /// An unknown name resolves to [`None`], which leaves `%animation:foo%` on
     /// screen. Java TAB does the same, and it is the only useful behaviour: a
     /// mistyped animation name has to be visible.
-    fn frame(&self, animation: &str, depth: u8) -> Option<String> {
-        if depth == 0 {
-            return None;
-        }
-        let frame = frame_text(self.config.animations.get(animation)?, self.clock.elapsed_ms())?;
-        // A frame is a template, so it goes round again. The depth guard is what
-        // stops an animation that refers to itself from spinning here.
-        Some(text::substitute(&frame, |inner| self.resolve_at(inner, depth - 1)))
+    fn frame(&self, animation: &str, path: &Path<'_>) -> Option<String> {
+        let frame = frame_text(
+            self.config.animations.get(animation)?,
+            self.clock.elapsed_ms(),
+        )?;
+        // A frame is a template, so it goes round again. The path is what stops an
+        // animation that refers to itself from spinning here.
+        Some(text::substitute(&frame, |inner| {
+            self.resolve_in(inner, path)
+        }))
     }
 
     fn built_in(&self, name: &str) -> Option<String> {
@@ -290,7 +336,9 @@ impl View<'_> {
             // The op level, as the number the config uses, so
             // `%permission_level%>=2` means exactly what `op-level-groups`'s
             // `two:` means.
-            "permission_level" => player.map(|player| op_level(player.get_permission_level()).to_string()),
+            "permission_level" => {
+                player.map(|player| op_level(player.get_permission_level()).to_string())
+            }
             // Rounded up, because that is what the heart display shows and a
             // `6.5` in a tab list is not what anybody is looking at.
             "health" => player.map(|player| player.get_health().ceil().to_string()),
@@ -307,18 +355,20 @@ impl View<'_> {
             // point: a prefix defined in two places is a prefix that will
             // disagree with itself.
             "group" => group.map(str::to_string),
-            "online" => Some(self.server.get_player_count().to_string()),
-            "max_players" => Some(self.server.get_max_players().to_string()),
+            "online" => Some(self.server?.get_player_count().to_string()),
+            "max_players" => Some(self.server?.get_max_players().to_string()),
             // The host has a call for this rather than it being counted by hand:
             // `get-player-count-in-world` reads the world's own player set
             // (`server.rs:227`). It takes the world handle by value, so the
             // handle is fetched fresh and cannot be reused afterwards.
-            "worldonline" => player.map(|player| {
-                self.server
-                    .get_player_count_in_world(player.get_world())
-                    .to_string()
+            "worldonline" => player.and_then(|player| {
+                Some(
+                    self.server?
+                        .get_player_count_in_world(player.get_world())
+                        .to_string(),
+                )
             }),
-            "server_name" => Some(self.server.get_motd()),
+            "server_name" => Some(self.server?.get_motd()),
             // **Clamped, and not by choice.** The host computes `get_tps()` as
             // `1000.0 / mspt` with no ceiling (`server/mod.rs:1213`), so a server
             // doing 3.84 ms a tick reports `260.61`. That is the tick rate it
@@ -330,8 +380,8 @@ impl View<'_> {
             // Only the fast case is affected - anything slower than 20 is already
             // reported correctly - so this leaves a struggling server's number
             // alone and only stops an idle one from claiming 260.
-            "tps" => Some(format!("{:.2}", self.server.get_tps().min(MAX_TPS))),
-            "mspt" => Some(format!("{:.2}", self.server.get_mspt())),
+            "tps" => Some(format!("{:.2}", self.server?.get_tps().min(MAX_TPS))),
+            "mspt" => Some(format!("{:.2}", self.server?.get_mspt())),
             _ => None,
         }
     }
@@ -589,10 +639,7 @@ impl Operator {
     fn is_numeric(self) -> bool {
         matches!(
             self,
-            Self::GreaterThanOrEqual
-                | Self::GreaterThan
-                | Self::LessThanOrEqual
-                | Self::LessThan
+            Self::GreaterThanOrEqual | Self::GreaterThan | Self::LessThanOrEqual | Self::LessThan
         )
     }
 
@@ -722,7 +769,11 @@ impl Expression {
     /// a comparison on an unknown placeholder has nothing to compare. The caller
     /// leaves the text alone rather than showing half an answer.
     pub fn test(&self, view: &View<'_>) -> Option<bool> {
-        let resolve = |side: &str| text::substitute(side, |name| view.resolve(name));
+        self.test_in(view, &Path::default())
+    }
+
+    fn test_in(&self, view: &View<'_>, path: &Path<'_>) -> Option<bool> {
+        let resolve = |side: &str| text::substitute(side, |name| view.resolve_in(name, path));
         match self.compile()? {
             Compiled::Permission { node, held } => Some(view.player?.has_permission(&node) == held),
             Compiled::Compare {
@@ -745,10 +796,7 @@ enum Compiled {
     },
     /// A node check: `permission:<node>`, or `!permission:<node>` when the node
     /// must **not** be held.
-    Permission {
-        node: String,
-        held: bool,
-    },
+    Permission { node: String, held: bool },
 }
 
 /// The two sides of `text` around the first `symbol` outside a `%…%`.
@@ -809,10 +857,14 @@ impl Condition {
     /// an empty `conditions:` list shows up as an unresolved placeholder instead
     /// of silently picking the `true:` text.
     pub fn test(&self, view: &View<'_>) -> Option<bool> {
+        self.test_in(view, &Path::default())
+    }
+
+    fn test_in(&self, view: &View<'_>, path: &Path<'_>) -> Option<bool> {
         let mut expressions = self.conditions.iter();
-        let mut held = expressions.next()?.test(view)?;
+        let mut held = expressions.next()?.test_in(view, path)?;
         for expression in expressions {
-            let met = expression.test(view)?;
+            let met = expression.test_in(view, path)?;
             match self.kind {
                 ConditionKind::And => held &= met,
                 ConditionKind::Or => held |= met,
@@ -821,20 +873,19 @@ impl Condition {
         Some(held)
     }
 
-    /// The chosen text, resolved as a template one level shallower than `depth`.
+    /// The chosen text, resolved as a template.
     ///
-    /// [`None`] at [`MAX_DEPTH`], which is what stops `%condition:a%` whose
-    /// `true:` text is `%condition:a%` from spinning inside a refresh.
-    pub fn resolve(&self, view: &View<'_>, depth: u8) -> Option<String> {
-        if depth == 0 {
-            return None;
-        }
-        let chosen = if self.test(view)? {
+    /// `path` already holds this condition, so `%condition:a%` whose `true:` text
+    /// or expression is `%condition:a%` meets itself and stays as written.
+    pub fn resolve(&self, view: &View<'_>, path: &Path<'_>) -> Option<String> {
+        let chosen = if self.test_in(view, path)? {
             &self.when_true
         } else {
             &self.when_false
         };
-        Some(text::substitute(chosen, |inner| view.resolve_at(inner, depth - 1)))
+        Some(text::substitute(chosen, |inner| {
+            view.resolve_in(inner, path)
+        }))
     }
 }
 
@@ -842,6 +893,50 @@ impl Condition {
 mod tests {
     use super::*;
     use crate::config::DEFAULT_AUTOHIDE;
+
+    #[test]
+    fn recursive_condition_operands_and_outputs_are_bounded() {
+        let config = Config::parse(
+            "conditions:\n  self_cycle:\n    conditions: ['%condition:self_cycle%=true']\n    true: 'yes'\n    false: 'no'\n  a:\n    conditions: ['%condition:b%=true']\n    true: 'yes'\n    false: 'no'\n  b:\n    conditions: ['%condition:a%=true']\n    true: 'true'\n    false: 'false'\n  output_cycle:\n    conditions: ['1=1']\n    true: '%condition:output_cycle%'\n  simple:\n    conditions: ['1=1']\n    true: 'yes'\n  nested:\n    conditions: ['%condition:simple%=yes']\n    true: 'works'\n",
+        )
+        .expect("valid");
+        let view = View {
+            config: &config,
+            clock: Clock::start(),
+            server: None,
+            player: None,
+            group: None,
+        };
+        assert_eq!(view.resolve("condition:self_cycle").as_deref(), Some("no"));
+        assert_eq!(view.resolve("condition:a").as_deref(), Some("no"));
+        assert_eq!(
+            view.resolve("condition:output_cycle").as_deref(),
+            Some("%condition:output_cycle%")
+        );
+        assert_eq!(view.resolve("condition:simple").as_deref(), Some("yes"));
+        assert_eq!(view.resolve("condition:nested").as_deref(), Some("works"));
+    }
+
+    #[test]
+    fn nested_conditions_hold_wherever_they_are_reached() {
+        let config = Config::parse(
+            "conditions:\n  simple:\n    conditions: ['1=1']\n    true: 'yes'\n  nested:\n    conditions: ['%condition:simple%=yes']\n    true: 'works'\n    false: 'broken'\n  outer:\n    conditions: ['1=2']\n    true: 'no'\n    false: '%condition:nested%'\nanimations:\n  frame:\n    change-interval: 1000\n    texts: ['%condition:nested%']\n  outer_frame:\n    change-interval: 1000\n    texts: ['%condition:outer%']\n",
+        )
+        .expect("valid");
+        let view = View {
+            config: &config,
+            clock: Clock::start(),
+            server: None,
+            player: None,
+            group: None,
+        };
+        assert_eq!(view.resolve("animation:frame").as_deref(), Some("works"));
+        assert_eq!(view.resolve("condition:outer").as_deref(), Some("works"));
+        assert_eq!(
+            view.resolve("animation:outer_frame").as_deref(),
+            Some("works")
+        );
+    }
 
     fn animation(interval: u64, texts: &[&str]) -> Animation {
         Animation {
@@ -944,9 +1039,23 @@ mod tests {
     #[test]
     fn every_built_in_has_an_arm_and_every_arm_is_listed() {
         const ARMED: [&str; 17] = [
-            "player", "viewer", "ping", "world", "uuid", "permission_level", "health",
-            "gamemode", "player_ip", "bedrock", "group", "online", "max_players", "worldonline",
-            "server_name", "tps", "mspt",
+            "player",
+            "viewer",
+            "ping",
+            "world",
+            "uuid",
+            "permission_level",
+            "health",
+            "gamemode",
+            "player_ip",
+            "bedrock",
+            "group",
+            "online",
+            "max_players",
+            "worldonline",
+            "server_name",
+            "tps",
+            "mspt",
         ];
         let mut expected: Vec<&str> = ARMED.into();
         // An alias resolves before the match, so it is never an arm of its own -
@@ -967,7 +1076,11 @@ mod tests {
     #[test]
     fn the_condition_prefix_is_not_a_built_in() {
         assert!(!BUILT_INS.contains(&CONDITION_PREFIX));
-        assert!(!BUILT_IN_ALIASES.iter().any(|(alias, _)| alias.contains(":")));
+        assert!(
+            !BUILT_IN_ALIASES
+                .iter()
+                .any(|(alias, _)| alias.contains(":"))
+        );
     }
 
     #[test]
@@ -990,8 +1103,16 @@ mod tests {
     #[test]
     fn the_names_and_the_count_agree() {
         for text in ["%a% and %b%", "%a% and %a%", "none", "50% off %a%", "%a%!"] {
-            assert_eq!(count_placeholders(text), placeholder_names(text).len(), "{text}");
-            assert_eq!(has_placeholder(text), !placeholder_names(text).is_empty(), "{text}");
+            assert_eq!(
+                count_placeholders(text),
+                placeholder_names(text).len(),
+                "{text}"
+            );
+            assert_eq!(
+                has_placeholder(text),
+                !placeholder_names(text).is_empty(),
+                "{text}"
+            );
         }
         assert_eq!(placeholder_names("%a% and %a%"), ["a", "a"]);
         assert_eq!(placeholder_names("50% off %a%"), ["a"]);
@@ -1029,7 +1150,10 @@ mod tests {
             "%nope%Steve"
         );
         // `nope` is not in the list, so it stays as written.
-        assert_eq!(hide_unresolved("%balance%Steve", &["perm_prefix".to_string()]), "%balance%Steve");
+        assert_eq!(
+            hide_unresolved("%balance%Steve", &["perm_prefix".to_string()]),
+            "%balance%Steve"
+        );
     }
 
     #[test]
@@ -1087,7 +1211,10 @@ mod tests {
     fn a_blank_spacer_line_survives_an_unresolved_placeholder_elsewhere() {
         let header = "rule\ntitle\n%unanswered%";
         // Nothing listed matches, so the block must come back untouched.
-        assert_eq!(hide_unresolved(header, &["perm_prefix".to_string()]), header);
+        assert_eq!(
+            hide_unresolved(header, &["perm_prefix".to_string()]),
+            header
+        );
 
         let header_with_trailing_blank = "rule\ntitle\n%unanswered%\n";
         assert_eq!(
@@ -1134,7 +1261,10 @@ mod tests {
     }
 
     fn shipped_autohide() -> Vec<String> {
-        DEFAULT_AUTOHIDE.iter().map(|name| (*name).to_string()).collect()
+        DEFAULT_AUTOHIDE
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect()
     }
 
     // ---- conditions -------------------------------------------------------
@@ -1188,7 +1318,11 @@ mod tests {
     #[test]
     fn a_negated_comparison_is_not_read_as_the_bare_operator_inside_it() {
         for (text, expected, sides) in [
-            ("%world%!<-lobby-", Operator::NotContains, ("%world%", "lobby-")),
+            (
+                "%world%!<-lobby-",
+                Operator::NotContains,
+                ("%world%", "lobby-"),
+            ),
             ("%world%<-lobby-", Operator::Contains, ("%world%", "lobby-")),
             ("%ping%>=50", Operator::GreaterThanOrEqual, ("%ping%", "50")),
             ("%ping%<=50", Operator::LessThanOrEqual, ("%ping%", "50")),
@@ -1246,7 +1380,10 @@ mod tests {
         );
         // The percent guard: an operator character inside a placeholder is not
         // the operator.
-        assert_eq!(split("%a%=b", "="), Some(("%a%".to_string(), "b".to_string())));
+        assert_eq!(
+            split("%a%=b", "="),
+            Some(("%a%".to_string(), "b".to_string()))
+        );
         assert_eq!(split("no operator here", ">="), None);
         // An unbalanced `%` swallows the rest, which is why a condition cannot
         // compare against a literal containing one.
@@ -1308,7 +1445,14 @@ mod tests {
 
     #[test]
     fn a_malformed_expression_is_reported_rather_than_guessed_at() {
-        for bad in ["", "   ", "just some text", "%ping%", "permission:", "  !permission: "] {
+        for bad in [
+            "",
+            "   ",
+            "just some text",
+            "%ping%",
+            "permission:",
+            "  !permission: ",
+        ] {
             let expression = Expression::new(bad);
             assert_eq!(expression.compile(), None, "{bad:?} should not compile");
             let problem = expression.problem().expect("a complaint");
@@ -1345,7 +1489,10 @@ mod tests {
         let expression = Expression::new("%ping%<50");
         let yaml = serde_norway::to_string(&expression).expect("serialises");
         assert_eq!(yaml.trim(), "'%ping%<50'");
-        assert_eq!(serde_norway::from_str::<Expression>(&yaml).unwrap(), expression);
+        assert_eq!(
+            serde_norway::from_str::<Expression>(&yaml).unwrap(),
+            expression
+        );
     }
 
     /// One operator and the outcomes it has to produce, in the order the cases
@@ -1357,16 +1504,52 @@ mod tests {
     #[test]
     fn every_comparator_evaluates_both_ways() {
         let cases: [(Operator, &[Outcome<'_>]); 12] = [
-            (Operator::GreaterThanOrEqual, &[("2", "2", true), ("3", "2", true), ("1", "2", false)]),
-            (Operator::GreaterThan, &[("2", "2", false), ("3", "2", true), ("1", "2", false)]),
-            (Operator::LessThanOrEqual, &[("2", "2", true), ("1", "2", true), ("3", "2", false)]),
-            (Operator::LessThan, &[("2", "2", false), ("1", "2", true), ("3", "2", false)]),
-            (Operator::NotContains, &[("lobby-1", "lobby-", false), ("world", "lobby-", true)]),
-            (Operator::NotStartsWith, &[("lobby-1", "lobby-", false), ("x-lobby", "lobby-", true)]),
-            (Operator::NotEndsWith, &[("world_nether", "nether", false), ("nether_x", "nether", true)]),
-            (Operator::Contains, &[("lobby-1", "lobby-", true), ("world", "lobby-", false)]),
-            (Operator::StartsWith, &[("lobby-1", "lobby-", true), ("x-lobby", "lobby-", false)]),
-            (Operator::EndsWith, &[("world_nether", "nether", true), ("nether_x", "nether", false)]),
+            (
+                Operator::GreaterThanOrEqual,
+                &[("2", "2", true), ("3", "2", true), ("1", "2", false)],
+            ),
+            (
+                Operator::GreaterThan,
+                &[("2", "2", false), ("3", "2", true), ("1", "2", false)],
+            ),
+            (
+                Operator::LessThanOrEqual,
+                &[("2", "2", true), ("1", "2", true), ("3", "2", false)],
+            ),
+            (
+                Operator::LessThan,
+                &[("2", "2", false), ("1", "2", true), ("3", "2", false)],
+            ),
+            (
+                Operator::NotContains,
+                &[("lobby-1", "lobby-", false), ("world", "lobby-", true)],
+            ),
+            (
+                Operator::NotStartsWith,
+                &[("lobby-1", "lobby-", false), ("x-lobby", "lobby-", true)],
+            ),
+            (
+                Operator::NotEndsWith,
+                &[
+                    ("world_nether", "nether", false),
+                    ("nether_x", "nether", true),
+                ],
+            ),
+            (
+                Operator::Contains,
+                &[("lobby-1", "lobby-", true), ("world", "lobby-", false)],
+            ),
+            (
+                Operator::StartsWith,
+                &[("lobby-1", "lobby-", true), ("x-lobby", "lobby-", false)],
+            ),
+            (
+                Operator::EndsWith,
+                &[
+                    ("world_nether", "nether", true),
+                    ("nether_x", "nether", false),
+                ],
+            ),
             (Operator::NotEquals, &[("a", "a", false), ("a", "b", true)]),
             (Operator::Equals, &[("a", "a", true), ("a", "b", false)]),
         ];

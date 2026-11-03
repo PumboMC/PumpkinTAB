@@ -79,14 +79,21 @@ pub struct Resolved<'a> {
 /// default group. The order is the whole rule, and it is the config's list order.
 pub fn resolve<'a>(config: &'a Config, player: &Player) -> Resolved<'a> {
     let level = player.get_permission_level();
+    resolve_with(config, level, |node| player.has_permission_set(node))
+}
 
+fn resolve_with<'a>(
+    config: &'a Config,
+    level: PermissionLevel,
+    permission: impl Fn(&str) -> Option<bool>,
+) -> Resolved<'a> {
     for (index, name) in config.groups_by_order().iter().enumerate() {
         let Some(node) = config.node_for(name) else {
             // Reported by `Config::problems`; here it just cannot match, so one
             // unusable name does not stop the rest of the ladder.
             continue;
         };
-        if player.has_permission_set(&node) == Some(true) {
+        if permission(&node) == Some(true) {
             return Resolved {
                 name,
                 index: Some(index),
@@ -96,17 +103,32 @@ pub fn resolve<'a>(config: &'a Config, player: &Player) -> Resolved<'a> {
     }
 
     // No node granted. An op level can still put them somewhere, which is how an
-    // operator shows as an admin without anyone having run `/pumpkinperm set`.
-    for (configured, name) in &config.op_level_groups {
-        if level >= level_of(*configured)
-            && let Some(index) = config.groups_by_order().iter().position(|listed| listed == name)
-        {
-            return Resolved {
-                name,
-                index: Some(index),
-                reason: Some(Reason::OpLevel),
-            };
-        }
+    // operator shows as an admin without anyone having run `/pumpkinperm set`. Of
+    // the groups their level reaches, the one highest in `groups:` wins, the same
+    // rule as above; a group whose node they are explicitly denied is skipped.
+    let by_level = config
+        .op_level_groups
+        .iter()
+        .filter(|(configured, name)| {
+            level >= level_of(**configured)
+                && config
+                    .node_for(name)
+                    .is_none_or(|node| permission(&node) != Some(false))
+        })
+        .filter_map(|(_, name)| {
+            let index = config
+                .groups_by_order()
+                .iter()
+                .position(|listed| listed == name)?;
+            Some((index, name))
+        })
+        .min_by_key(|(index, _)| *index);
+    if let Some((index, name)) = by_level {
+        return Resolved {
+            name,
+            index: Some(index),
+            reason: Some(Reason::OpLevel),
+        };
     }
 
     // Nobody qualified, so the fallback. `default` is normally in the list and would
@@ -144,7 +166,10 @@ pub fn name_problem(name: &str) -> Option<String> {
         return Some("the name is empty".to_string());
     }
     if name.len() > 64 {
-        return Some(format!("the name is {} characters, the limit is 64", name.len()));
+        return Some(format!(
+            "the name is {} characters, the limit is 64",
+            name.len()
+        ));
     }
     if let Some(bad) = name
         .bytes()
@@ -172,8 +197,58 @@ mod tests {
     }
 
     #[test]
+    fn operator_fallback_follows_the_list_order() {
+        // The level map is the other way round from the list here: a level-four op
+        // reaches both groups and gets the one listed first, not the higher level.
+        let config = Config::parse(
+            "groups: [owner, admin, vip, default]\n\
+             op-level-groups:\n  two: owner\n  four: admin\n",
+        )
+        .expect("valid");
+        let name = |level| resolve_with(&config, level, |_| None).name.to_string();
+        assert_eq!(name(PermissionLevel::Four), "owner");
+        assert_eq!(name(PermissionLevel::Two), "owner");
+        assert_eq!(name(PermissionLevel::One), "default");
+
+        // A name that cannot form a node has no node to deny, so op level still
+        // reaches it.
+        let config = Config::parse(
+            "groups: ['head admin', default]\nop-level-groups:\n  four: 'head admin'\n",
+        )
+        .expect("valid");
+        assert_eq!(
+            resolve_with(&config, PermissionLevel::Four, |_| None).name,
+            "head admin"
+        );
+    }
+
+    #[test]
+    fn operator_fallback_respects_denials() {
+        let config = config();
+        let resolve = |denied: Option<&str>| {
+            resolve_with(&config, PermissionLevel::Four, |node| {
+                (Some(node) == denied).then_some(false)
+            })
+            .name
+            .to_string()
+        };
+        assert_eq!(resolve(None), "owner");
+        assert_eq!(resolve(Some("PumpkinPerm:group.owner")), "admin");
+        assert_eq!(
+            resolve_with(&config, PermissionLevel::Four, |node| {
+                (node == "PumpkinPerm:group.vip").then_some(true)
+            })
+            .name,
+            "vip"
+        );
+    }
+
+    #[test]
     fn the_list_order_is_the_order() {
-        assert_eq!(config().groups_by_order(), ["owner", "admin", "vip", "default"]);
+        assert_eq!(
+            config().groups_by_order(),
+            ["owner", "admin", "vip", "default"]
+        );
     }
 
     #[test]

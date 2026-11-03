@@ -102,8 +102,14 @@ pub fn refresh_all(server: &Server, snapshot: &Snapshot) {
         let view = view_for(snapshot, player, server);
 
         let slots = [
-            batcher.add(&name, local_block(&view, &snapshot.config.header_footer.header)),
-            batcher.add(&name, local_block(&view, &snapshot.config.header_footer.footer)),
+            batcher.add(
+                &name,
+                local_block(&view, &snapshot.config.header_footer.header),
+            ),
+            batcher.add(
+                &name,
+                local_block(&view, &snapshot.config.header_footer.footer),
+            ),
             batcher.add(&name, local_line(&view, &snapshot.config.tab_list.format)),
         ];
         let sidebar = sidebar_slot(snapshot, &mut batcher, &view, &name, &world);
@@ -183,7 +189,10 @@ fn line_slots(
 /// Written per player rather than once per world, so this is the function where
 /// a line's text becomes that reader's copy of it.
 fn push_lines(snapshot: &Snapshot, row: &Row, resolved: &[String], players: usize) {
-    if row.lines.is_empty() || !snapshot.owns_player(&row.name) {
+    if row.lines.is_empty()
+        || !snapshot.config.scoreboard.applies_in(&row.world)
+        || !snapshot.owns_player(&row.name)
+    {
         return;
     }
     let configured: Vec<board::Line<'_>> = snapshot
@@ -226,8 +235,14 @@ pub fn apply_player(server: &Server, snapshot: &Snapshot, player: &Player) {
 
     let mut batcher = pie::Batcher::new();
     let slots = [
-        batcher.add(&name, local_block(&view, &snapshot.config.header_footer.header)),
-        batcher.add(&name, local_block(&view, &snapshot.config.header_footer.footer)),
+        batcher.add(
+            &name,
+            local_block(&view, &snapshot.config.header_footer.header),
+        ),
+        batcher.add(
+            &name,
+            local_block(&view, &snapshot.config.header_footer.footer),
+        ),
         batcher.add(&name, local_line(&view, &snapshot.config.tab_list.format)),
     ];
     let sidebar = sidebar_slot(snapshot, &mut batcher, &view, &name, &world);
@@ -300,7 +315,7 @@ fn view_for<'a>(snapshot: &'a Snapshot, player: &'a Player, server: &'a Server) 
     View {
         config: &snapshot.config,
         clock: snapshot.clock,
-        server,
+        server: Some(server),
         player: Some(player),
         group: Some(group_name),
     }
@@ -311,7 +326,7 @@ fn shared_view<'a>(snapshot: &'a Snapshot, server: &'a Server) -> View<'a> {
     View {
         config: &snapshot.config,
         clock: snapshot.clock,
-        server,
+        server: Some(server),
         player: None,
         group: None,
     }
@@ -356,10 +371,7 @@ fn push_player(player: &Player, row: &Row, resolved: &[String], config: &crate::
     } else {
         // Empty on purpose: see above. The setters take a component and have no
         // "unset" arm, so nothing is the component that says nothing.
-        player.set_tab_list_header_footer(
-            TextComponent::text(""),
-            TextComponent::text(""),
-        );
+        player.set_tab_list_header_footer(TextComponent::text(""), TextComponent::text(""));
     }
 
     if !config.tab_list.applies_in(&row.world) {
@@ -371,8 +383,7 @@ fn push_player(player: &Player, row: &Row, resolved: &[String], config: &crate::
              name was cleared rather than left from the last enabled world. Sort order and \
              latency keep their last values, which affect where they sit and the bar beside \
              them but are not this section's to reset",
-            row.name,
-            row.world
+            row.name, row.world
         );
         return;
     }
@@ -428,6 +439,24 @@ fn push_sideboard(
             // which the row the old config left behind could be taken off, and it
             // would otherwise sit there for the rest of the server's life.
             None => board::clear_row(board, &row.name),
+        }
+    });
+}
+
+/// Takes a joining player off the bar if the host still lists them.
+///
+/// The host keeps bar members by UUID and nothing takes a player off when they
+/// leave, so somebody who comes back is still listed. `add-player` skips a listed
+/// UUID, and their client, which forgot the bar on disconnect, would never get it
+/// again. Taking them off here lets the next refresh add them as new, which is
+/// what sends the bar. `remove-player` takes the player by value, so it gets a
+/// handle of its own.
+pub fn drop_stale_bar_member(server: &Server, player: &Player) {
+    let name = player.get_name();
+    state::with_bar(|bar| {
+        let listed = bar.get_players().iter().any(|seen| seen.get_name() == name);
+        if listed && let Some(handle) = server.get_player_by_name(&name) {
+            bar.remove_player(handle);
         }
     });
 }

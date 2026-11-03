@@ -30,9 +30,7 @@ use pumpkin_plugin_api::{
 };
 use tracing::warn;
 
-use crate::{
-    config::BossBar as BossBarConfig, render::View, text,
-};
+use crate::{config::BossBar as BossBarConfig, render::View, text};
 /// Every colour the host accepts, lower case, for matching and for the error
 /// message.
 ///
@@ -113,7 +111,8 @@ pub fn update(bar: &BossBar, config: &BossBarConfig, view: &View<'_>) {
             // Once, not once a second: a bad colour template is a config mistake
             // and repeating it every refresh would bury everything else in the
             // log.
-            static ONCE: std::sync::atomic::AtomicBool = const { std::sync::atomic::AtomicBool::new(false) };
+            static ONCE: std::sync::atomic::AtomicBool =
+                const { std::sync::atomic::AtomicBool::new(false) };
             if !ONCE.swap(true, std::sync::atomic::Ordering::Relaxed) {
                 warn!(
                     "bossbar colour template resolved to '{resolved}', which is not a bossbar \

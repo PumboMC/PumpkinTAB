@@ -462,7 +462,9 @@ fn legacy_colour(code: char) -> Option<Colour> {
 
 /// Whether `name` is one of `names`, without regard to case.
 fn is_any(name: &str, names: &[&str]) -> bool {
-    names.iter().any(|spelled| name.eq_ignore_ascii_case(spelled))
+    names
+        .iter()
+        .any(|spelled| name.eq_ignore_ascii_case(spelled))
 }
 
 // ---------------------------------------------------------------------------
@@ -981,7 +983,9 @@ fn effect(tag: &Tag<'_>) -> Option<Effect> {
         return Some(Effect::Push(Change::Flag(flag, switch(tag.argument)?)));
     }
     if is_any(tag.name, &["gradient"]) {
-        return gradient_stops(tag.argument).map(Change::Gradient).map(Effect::Push);
+        return gradient_stops(tag.argument)
+            .map(Change::Gradient)
+            .map(Effect::Push);
     }
     if tag.argument.is_none() && is_any(tag.name, &["rainbow"]) {
         return Some(Effect::Push(Change::Rainbow));
@@ -1184,11 +1188,7 @@ pub fn unknown_tags(template: &str) -> Vec<String> {
             .chars()
             .next()
             .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
-        if !starts_like_a_name
-            || !name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
+        if !starts_like_a_name || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             continue;
         }
         if !known_tag(name) && !found.iter().any(|seen| seen == name) {
@@ -1586,24 +1586,24 @@ pub fn escape(input: &str) -> String {
             continue;
         }
 
-            if chars.get(index + 1) == Some(&'#') {
-                // `slice::get` is used rather than indexing, so a `&#` at the very
-                // end of the string cannot panic. A short read is not a colour, and
-                // falls through to the escaping below, which leaves the text alone.
-                let hex: String = chars
-                    .get(index + 2..index + 8)
-                    .map_or_else(String::new, |digits| digits.iter().copied().collect());
-                if is_hex_colour(&hex) {
+        if chars.get(index + 1) == Some(&'#') {
+            // `slice::get` is used rather than indexing, so a `&#` at the very
+            // end of the string cannot panic. A short read is not a colour, and
+            // falls through to the escaping below, which leaves the text alone.
+            let hex: String = chars
+                .get(index + 2..index + 8)
+                .map_or_else(String::new, |digits| digits.iter().copied().collect());
+            if is_hex_colour(&hex) {
+                out.push(CODE);
+                out.push('x');
+                for digit in hex.chars() {
                     out.push(CODE);
-                    out.push('x');
-                    for digit in hex.chars() {
-                        out.push(CODE);
-                        out.push(digit.to_ascii_lowercase());
-                    }
-                    index += 8;
-                    continue;
+                    out.push(digit.to_ascii_lowercase());
                 }
+                index += 8;
+                continue;
             }
+        }
 
         match chars.get(index + 1) {
             Some(&next) if is_code(next) => {
@@ -1825,7 +1825,10 @@ mod tests {
             Some(vec![Colour::Red, Colour::Blue]),
             "the gradient is on the run, not on the text"
         );
-        assert!(run.text.is_empty(), "the span opened with no text of its own");
+        assert!(
+            run.text.is_empty(),
+            "the span opened with no text of its own"
+        );
         assert_eq!(run.children.len(), 3);
         assert_eq!(run.children[0].text, "a");
         assert_eq!(run.children[1].text, "b");
@@ -1855,7 +1858,10 @@ mod tests {
         assert_eq!(tree("<gradient:red>x")[0].text, "<gradient:red>x");
         // A stop that is not a colour makes the whole tag unusable, rather than
         // quietly using the ones that parsed.
-        assert_eq!(tree("<gradient:red:nonsense>x")[0].text, "<gradient:red:nonsense>x");
+        assert_eq!(
+            tree("<gradient:red:nonsense>x")[0].text,
+            "<gradient:red:nonsense>x"
+        );
     }
 
     /// The one thing that is *not* inherited as a span of style: a gradient
@@ -1877,7 +1883,10 @@ mod tests {
         let runs = tree("<gradient:red:blue>a<gradient:green:yellow>b</gradient>c</gradient>");
         assert_eq!(runs[0].children.len(), 3);
         assert_eq!(runs[0].children[0].text, "a");
-        assert_eq!(runs[0].children[1].style.gradient, Some(vec![Colour::Green, Colour::Yellow]));
+        assert_eq!(
+            runs[0].children[1].style.gradient,
+            Some(vec![Colour::Green, Colour::Yellow])
+        );
         assert_eq!(runs[0].children[2].text, "c");
     }
 
@@ -2396,7 +2405,9 @@ mod tests {
         for name in STYLE_FLAGS.iter().map(|(name, _)| *name) {
             assert!(known_tag(name), "{name}");
         }
-        for name in ["reset", "r", "rainbow", "gradient", "click", "hover", "font", "insert"] {
+        for name in [
+            "reset", "r", "rainbow", "gradient", "click", "hover", "font", "insert",
+        ] {
             assert!(known_tag(name), "{name}");
         }
         assert!(!known_tag("gray8"));
