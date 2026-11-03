@@ -1920,35 +1920,21 @@ mod tests {
         );
     }
 
-    /// The shipped config has no `scoreboard:` section.
-    ///
-    /// It still ships off by default, but the reason has changed and this test records
-    /// the new one. Each viewer now has their own board, so every placeholder in a
-    /// `lines:` entry resolves against them and there is no longer anything a shipped
-    /// sidebar could show as literal text. It stays opt-in because a sidebar that
-    /// appears on an existing server unasked is not a welcome surprise, not because
-    /// placeholders in it would be broken.
-    ///
-    /// A shipped sidebar **with** per-player placeholders would now be a good default,
-    /// and is left as the next thing to decide rather than being ruled out here.
+    /// The shipped sidebar is enabled and has visible configured lines.
     #[test]
-    fn the_shipped_config_ships_no_sidebar_and_that_is_deliberate() {
+    fn the_shipped_config_enables_the_sidebar() {
         let config = Config::parse(DEFAULT_CONFIG).expect("valid");
-        assert!(
-            !config.scoreboard.enabled,
-            "the sidebar stays opt-in, so an existing server does not grow one unasked"
-        );
+        assert!(config.scoreboard.enabled, "the shipped sidebar is enabled");
+        assert!(!config.scoreboard.lines.is_empty());
 
-        // A `Config` with no `scoreboard:` key is valid, and must not be reported as
-        // a problem.
+        // The shipped sidebar must not have configuration problems.
         assert!(
             config.problems().iter().all(|p| !p.contains("scoreboard")),
             "{:?}",
             config.problems()
         );
 
-        // The rest of the shipped config is unaffected - this guards the section's
-        // removal, not the sidebar itself.
+        // The other shipped features remain enabled too.
         assert!(config.header_footer.enabled);
         assert!(config.tab_list.enabled);
         assert!(config.refresh_ticks() > 0);

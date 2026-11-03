@@ -79,14 +79,21 @@ pub struct Resolved<'a> {
 /// default group. The order is the whole rule, and it is the config's list order.
 pub fn resolve<'a>(config: &'a Config, player: &Player) -> Resolved<'a> {
     let level = player.get_permission_level();
+    resolve_with(config, level, |node| player.has_permission_set(node))
+}
 
+fn resolve_with<'a>(
+    config: &'a Config,
+    level: PermissionLevel,
+    permission: impl Fn(&str) -> Option<bool>,
+) -> Resolved<'a> {
     for (index, name) in config.groups_by_order().iter().enumerate() {
         let Some(node) = config.node_for(name) else {
             // Reported by `Config::problems`; here it just cannot match, so one
             // unusable name does not stop the rest of the ladder.
             continue;
         };
-        if player.has_permission_set(&node) == Some(true) {
+        if permission(&node) == Some(true) {
             return Resolved {
                 name,
                 index: Some(index),
@@ -97,12 +104,14 @@ pub fn resolve<'a>(config: &'a Config, player: &Player) -> Resolved<'a> {
 
     // No node granted. An op level can still put them somewhere, which is how an
     // operator shows as an admin without anyone having run `/pumpkinperm set`.
-    for (configured, name) in &config.op_level_groups {
+    for (configured, name) in config.op_level_groups.iter().rev() {
         if level >= level_of(*configured)
             && let Some(index) = config
                 .groups_by_order()
                 .iter()
                 .position(|listed| listed == name)
+            && let Some(node) = config.node_for(name)
+            && permission(&node) != Some(false)
         {
             return Resolved {
                 name,
@@ -175,6 +184,27 @@ mod tests {
              op-level-groups:\n  four: owner\n  two: admin\n",
         )
         .expect("valid")
+    }
+
+    #[test]
+    fn operator_fallback_uses_highest_level_and_respects_denials() {
+        let config = config();
+        let resolve = |denied: Option<&str>| {
+            resolve_with(&config, PermissionLevel::Four, |node| {
+                (Some(node) == denied).then_some(false)
+            })
+            .name
+            .to_string()
+        };
+        assert_eq!(resolve(None), "owner");
+        assert_eq!(resolve(Some("PumpkinPerm:group.owner")), "admin");
+        assert_eq!(
+            resolve_with(&config, PermissionLevel::Four, |node| {
+                (node == "PumpkinPerm:group.vip").then_some(true)
+            })
+            .name,
+            "vip"
+        );
     }
 
     #[test]

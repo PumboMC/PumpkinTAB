@@ -214,8 +214,8 @@ pub struct View<'a> {
     /// The clock animations read.
     pub clock: Clock,
 
-    /// The server, for the global values.
-    pub server: &'a Server,
+    /// The server for global values; absent when rendering without a host.
+    pub server: Option<&'a Server>,
 
     /// Whose entry is being built, if any.
     ///
@@ -328,18 +328,20 @@ impl View<'_> {
             // point: a prefix defined in two places is a prefix that will
             // disagree with itself.
             "group" => group.map(str::to_string),
-            "online" => Some(self.server.get_player_count().to_string()),
-            "max_players" => Some(self.server.get_max_players().to_string()),
+            "online" => Some(self.server?.get_player_count().to_string()),
+            "max_players" => Some(self.server?.get_max_players().to_string()),
             // The host has a call for this rather than it being counted by hand:
             // `get-player-count-in-world` reads the world's own player set
             // (`server.rs:227`). It takes the world handle by value, so the
             // handle is fetched fresh and cannot be reused afterwards.
-            "worldonline" => player.map(|player| {
-                self.server
-                    .get_player_count_in_world(player.get_world())
-                    .to_string()
+            "worldonline" => player.and_then(|player| {
+                Some(
+                    self.server?
+                        .get_player_count_in_world(player.get_world())
+                        .to_string(),
+                )
             }),
-            "server_name" => Some(self.server.get_motd()),
+            "server_name" => Some(self.server?.get_motd()),
             // **Clamped, and not by choice.** The host computes `get_tps()` as
             // `1000.0 / mspt` with no ceiling (`server/mod.rs:1213`), so a server
             // doing 3.84 ms a tick reports `260.61`. That is the tick rate it
@@ -351,8 +353,8 @@ impl View<'_> {
             // Only the fast case is affected - anything slower than 20 is already
             // reported correctly - so this leaves a struggling server's number
             // alone and only stops an idle one from claiming 260.
-            "tps" => Some(format!("{:.2}", self.server.get_tps().min(MAX_TPS))),
-            "mspt" => Some(format!("{:.2}", self.server.get_mspt())),
+            "tps" => Some(format!("{:.2}", self.server?.get_tps().min(MAX_TPS))),
+            "mspt" => Some(format!("{:.2}", self.server?.get_mspt())),
             _ => None,
         }
     }
@@ -740,7 +742,11 @@ impl Expression {
     /// a comparison on an unknown placeholder has nothing to compare. The caller
     /// leaves the text alone rather than showing half an answer.
     pub fn test(&self, view: &View<'_>) -> Option<bool> {
-        let resolve = |side: &str| text::substitute(side, |name| view.resolve(name));
+        self.test_at(view, MAX_DEPTH)
+    }
+
+    fn test_at(&self, view: &View<'_>, depth: u8) -> Option<bool> {
+        let resolve = |side: &str| text::substitute(side, |name| view.resolve_at(name, depth));
         match self.compile()? {
             Compiled::Permission { node, held } => Some(view.player?.has_permission(&node) == held),
             Compiled::Compare {
@@ -824,10 +830,14 @@ impl Condition {
     /// an empty `conditions:` list shows up as an unresolved placeholder instead
     /// of silently picking the `true:` text.
     pub fn test(&self, view: &View<'_>) -> Option<bool> {
+        self.test_at(view, MAX_DEPTH)
+    }
+
+    fn test_at(&self, view: &View<'_>, depth: u8) -> Option<bool> {
         let mut expressions = self.conditions.iter();
-        let mut held = expressions.next()?.test(view)?;
+        let mut held = expressions.next()?.test_at(view, depth)?;
         for expression in expressions {
-            let met = expression.test(view)?;
+            let met = expression.test_at(view, depth)?;
             match self.kind {
                 ConditionKind::And => held &= met,
                 ConditionKind::Or => held |= met,
@@ -844,7 +854,7 @@ impl Condition {
         if depth == 0 {
             return None;
         }
-        let chosen = if self.test(view)? {
+        let chosen = if self.test_at(view, depth - 1)? {
             &self.when_true
         } else {
             &self.when_false
@@ -859,6 +869,29 @@ impl Condition {
 mod tests {
     use super::*;
     use crate::config::DEFAULT_AUTOHIDE;
+
+    #[test]
+    fn recursive_condition_operands_and_outputs_are_bounded() {
+        let config = Config::parse(
+            "conditions:\n  self_cycle:\n    conditions: ['%condition:self_cycle%=true']\n    true: 'yes'\n    false: 'no'\n  a:\n    conditions: ['%condition:b%=true']\n    true: 'yes'\n    false: 'no'\n  b:\n    conditions: ['%condition:a%=true']\n    true: 'true'\n    false: 'false'\n  output_cycle:\n    conditions: ['1=1']\n    true: '%condition:output_cycle%'\n  simple:\n    conditions: ['1=1']\n    true: 'yes'\n  nested:\n    conditions: ['%condition:simple%=yes']\n    true: 'works'\n",
+        )
+        .expect("valid");
+        let view = View {
+            config: &config,
+            clock: Clock::start(),
+            server: None,
+            player: None,
+            group: None,
+        };
+        assert_eq!(view.resolve("condition:self_cycle").as_deref(), Some("no"));
+        assert_eq!(view.resolve("condition:a").as_deref(), Some("no"));
+        assert_eq!(
+            view.resolve("condition:output_cycle").as_deref(),
+            Some("%condition:output_cycle%")
+        );
+        assert_eq!(view.resolve("condition:simple").as_deref(), Some("yes"));
+        assert_eq!(view.resolve("condition:nested").as_deref(), Some("works"));
+    }
 
     fn animation(interval: u64, texts: &[&str]) -> Animation {
         Animation {

@@ -92,9 +92,9 @@
 //! `pumpkin-plugin-api` WIT, and **the version number cannot be used to check**:
 //! Pumpkin kept `0.2.0+26.3-26.51` across a WIT change. A mismatch shows as
 //! `type-checking export func 'handle-event'` and nothing else. This build is
-//! pinned to Pumpkin `0.2.0+26.3-26.51`, commit
-//! `204a94ed895f041a845630d5a23c094705a0704e`, plugin WIT
-//! `e0bb97ea48d9857c181356ba14964d47b20d0f56`.
+//! pinned to Pumpkin `0.2.1+26.3-26.51`, commit
+//! `224f9f8144ca53a8d0800acb87607d714196e2a6`, plugin WIT
+//! `5aeec84177a489e920a22532e5aff2b5f9279c1b`.
 
 use std::{collections::BTreeSet, sync::OnceLock};
 
@@ -226,14 +226,14 @@ pub fn ensure_assets(snapshot: &state::Snapshot, server: &Server) {
 
 /// The bar, created once and then kept.
 fn ensure_bar(snapshot: &state::Snapshot, server: &Server) {
-    if !snapshot.config.bossbar.enabled {
+    if !snapshot.config.bossbar.enabled || state::has_bar() {
         return;
     }
     // A view with no player: the bar has one title for everybody.
     let view = render::View {
         config: &snapshot.config,
         clock: snapshot.clock,
-        server,
+        server: Some(server),
         player: None,
         group: None,
     };
@@ -263,15 +263,7 @@ fn ensure_scoreboard(snapshot: &state::Snapshot, server: &Server) {
         // `enabled: false` would leave the last sidebar frozen on every client.
         if let Some(handles) = state::take_scoreboards() {
             for (player, board) in handles {
-                for index in 0..state::line_count() {
-                    board.remove_score(&scoreboard::line_key(index), scoreboard::OBJECTIVE);
-                    board.remove_team(&scoreboard::line_team(index));
-                }
-                for team in state::teams() {
-                    board.remove_team(&team);
-                }
-                board.clear_display_slot(pumpkin_plugin_api::scoreboard::DisplaySlot::Sidebar);
-                board.remove_objective(scoreboard::OBJECTIVE);
+                remove_sidebar(&board);
                 info!("the sidebar is disabled; the objective was removed for {player}");
             }
             state::set_line_count(0);
@@ -284,7 +276,7 @@ fn ensure_scoreboard(snapshot: &state::Snapshot, server: &Server) {
     let view = render::View {
         config: &snapshot.config,
         clock: snapshot.clock,
-        server,
+        server: Some(server),
         player: None,
         group: None,
     };
@@ -301,6 +293,8 @@ fn ensure_scoreboard(snapshot: &state::Snapshot, server: &Server) {
         // scoreboard API, which Bedrock has a separate and smaller version of.
 
         if !snapshot.config.scoreboard.applies_in(&world) {
+            state::with_scoreboard(&name, remove_sidebar);
+            state::forget_player(&name);
             debug!("{name} is in world '{world}', which is under scoreboard.disabled-worlds");
             continue;
         }
@@ -342,6 +336,18 @@ fn ensure_scoreboard(snapshot: &state::Snapshot, server: &Server) {
     }
     state::set_teams(teams);
     state::set_line_count(line_count);
+}
+
+fn remove_sidebar(board: &pumpkin_plugin_api::scoreboard::Scoreboard) {
+    for index in 0..state::line_count() {
+        board.remove_score(&scoreboard::line_key(index), scoreboard::OBJECTIVE);
+        board.remove_team(&scoreboard::line_team(index));
+    }
+    for team in state::teams() {
+        board.remove_team(&team);
+    }
+    board.clear_display_slot(pumpkin_plugin_api::scoreboard::DisplaySlot::Sidebar);
+    board.remove_objective(scoreboard::OBJECTIVE);
 }
 
 /// Runs the refresh once. The body of the loop armed by [`restart_refresh`].

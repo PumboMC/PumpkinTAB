@@ -252,6 +252,11 @@ pub fn set_bar(bar: BossBar) {
     *recover(BAR.lock()) = Some(bar);
 }
 
+/// Whether a shared bossbar already exists.
+pub fn has_bar() -> bool {
+    recover(BAR.lock()).is_some()
+}
+
 /// Takes the sidebar handles out, for a teardown that has to write to each one
 /// before they go.
 ///

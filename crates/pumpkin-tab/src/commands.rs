@@ -272,7 +272,7 @@ impl CommandHandler for Preview {
         let view = View {
             config: &snapshot.config,
             clock: Clock::start(),
-            server: &server,
+            server: Some(&server),
             player: None,
             group: None,
         };
@@ -336,7 +336,7 @@ impl CommandHandler for Check {
         let view = View {
             config: &snapshot.config,
             clock: snapshot.clock,
-            server: &server,
+            server: Some(&server),
             player: Some(&handle),
             group: None,
         };

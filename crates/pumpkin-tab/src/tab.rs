@@ -189,7 +189,10 @@ fn line_slots(
 /// Written per player rather than once per world, so this is the function where
 /// a line's text becomes that reader's copy of it.
 fn push_lines(snapshot: &Snapshot, row: &Row, resolved: &[String], players: usize) {
-    if row.lines.is_empty() || !snapshot.owns_player(&row.name) {
+    if row.lines.is_empty()
+        || !snapshot.config.scoreboard.applies_in(&row.world)
+        || !snapshot.owns_player(&row.name)
+    {
         return;
     }
     let configured: Vec<board::Line<'_>> = snapshot
@@ -312,7 +315,7 @@ fn view_for<'a>(snapshot: &'a Snapshot, player: &'a Player, server: &'a Server) 
     View {
         config: &snapshot.config,
         clock: snapshot.clock,
-        server,
+        server: Some(server),
         player: Some(player),
         group: Some(group_name),
     }
@@ -323,7 +326,7 @@ fn shared_view<'a>(snapshot: &'a Snapshot, server: &'a Server) -> View<'a> {
     View {
         config: &snapshot.config,
         clock: snapshot.clock,
-        server,
+        server: Some(server),
         player: None,
         group: None,
     }
