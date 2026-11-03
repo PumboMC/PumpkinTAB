@@ -99,11 +99,13 @@
 //!
 //! ## Recursion
 //!
-//! Frames and conditions resolve as templates, so resolution can nest. It is
-//! bounded at [`MAX_DEPTH`] rather than left open: an animation whose frame is
-//! itself `%animation:itself%` is a config mistake, and an unbounded walk over it
-//! inside a once-a-second refresh is a hang. [`MAX_DEPTH`] is also how many
-//! conditions may chain, which covers TAB's own two-level ping example.
+//! Frames and conditions resolve as templates, so resolution can nest, and a
+//! condition's own expressions can read other conditions and animations. A
+//! [`Path`] carries the names a resolution is inside: a name that is already on it
+//! is a cycle and stays as written, because an animation whose frame is itself
+//! `%animation:itself%` is a config mistake and an unbounded walk over it inside a
+//! once-a-second refresh is a hang. Anything else may nest up to [`MAX_DEPTH`]
+//! levels, whether it is reached directly, from a frame or from another condition.
 
 use std::collections::BTreeMap;
 
@@ -130,12 +132,39 @@ pub const MAX_TPS: f64 = 20.0;
 /// The prefix that marks a conditional reference.
 pub const CONDITION_PREFIX: &str = "condition:";
 
-/// How deep a frame or a condition may nest before resolution gives up.
+/// How many frames and conditions may nest inside each other.
 ///
-/// Two is enough for the real cases: a frame containing a built-in, a frame
-/// containing another animation, and a condition whose `false:` text is a second
-/// condition, which is how TAB's own ping-colouring example is written.
-pub const MAX_DEPTH: u8 = 2;
+/// Cycles are caught by name on the [`Path`]; this only bounds what a config that
+/// nests deep without a cycle can cost per refresh. A frame showing a condition
+/// that reads another condition, whose `false:` text is a third, is four levels.
+pub const MAX_DEPTH: u8 = 8;
+
+/// The animations and conditions one resolution is inside, innermost first.
+#[derive(Clone, Copy, Default)]
+pub struct Path<'a> {
+    /// The reference as written, prefix included; empty at the root.
+    name: &'a str,
+    parent: Option<&'a Path<'a>>,
+    depth: u8,
+}
+
+impl Path<'_> {
+    /// `name` one level in, or [`None`] for a cycle or a chain past [`MAX_DEPTH`].
+    fn enter<'b>(&'b self, name: &'b str) -> Option<Path<'b>> {
+        let mut at = Some(self);
+        while let Some(path) = at {
+            if path.name == name {
+                return None;
+            }
+            at = path.parent;
+        }
+        (self.depth < MAX_DEPTH).then_some(Path {
+            name,
+            parent: Some(self),
+            depth: self.depth + 1,
+        })
+    }
+}
 
 /// The built-in placeholders, and the name each is written as in a config.
 ///
@@ -235,30 +264,31 @@ pub struct View<'a> {
 impl View<'_> {
     /// Resolves one placeholder name, or [`None`] to leave it as written.
     pub fn resolve(&self, name: &str) -> Option<String> {
-        self.resolve_at(name, MAX_DEPTH)
+        self.resolve_in(name, &Path::default())
     }
 
-    /// As [`Self::resolve`], with the depth budget carried through.
+    /// As [`Self::resolve`], inside the frames and conditions on `path`.
     ///
-    /// [`pub`] because a condition's `true:` / `false:` text is a template that
-    /// goes round the resolver again, one level shallower than the condition
-    /// itself. That is the whole recursion guard for conditions.
+    /// An animation or condition reference enters the path before it is resolved,
+    /// so one that is already on it, through a frame, an expression or a `true:` /
+    /// `false:` text, is a cycle and stays as written.
     ///
     /// Order matters, and is the order the module header documents: an animation,
     /// then a condition, then the built-ins. A name can claim only one prefix, and
     /// neither prefix is a legal built-in, so the three can never collide - which
     /// the two `*_prefix_is_not_a_built_in` tests hold rather than leave to
     /// inspection.
-    pub fn resolve_at(&self, name: &str, depth: u8) -> Option<String> {
-        if let Some(name) = name.strip_prefix(ANIMATION_PREFIX) {
-            return self.frame(name, depth);
+    pub fn resolve_in(&self, name: &str, path: &Path<'_>) -> Option<String> {
+        if let Some(animation) = name.strip_prefix(ANIMATION_PREFIX) {
+            return self.frame(animation, &path.enter(name)?);
         }
-        if let Some(name) = name.strip_prefix(CONDITION_PREFIX) {
+        if let Some(condition) = name.strip_prefix(CONDITION_PREFIX) {
+            let path = path.enter(name)?;
             return self
                 .config
                 .conditions
-                .get(name)
-                .and_then(|condition| condition.resolve(self, depth));
+                .get(condition)
+                .and_then(|condition| condition.resolve(self, &path));
         }
         self.built_in(name)
     }
@@ -268,18 +298,15 @@ impl View<'_> {
     /// An unknown name resolves to [`None`], which leaves `%animation:foo%` on
     /// screen. Java TAB does the same, and it is the only useful behaviour: a
     /// mistyped animation name has to be visible.
-    fn frame(&self, animation: &str, depth: u8) -> Option<String> {
-        if depth == 0 {
-            return None;
-        }
+    fn frame(&self, animation: &str, path: &Path<'_>) -> Option<String> {
         let frame = frame_text(
             self.config.animations.get(animation)?,
             self.clock.elapsed_ms(),
         )?;
-        // A frame is a template, so it goes round again. The depth guard is what
-        // stops an animation that refers to itself from spinning here.
+        // A frame is a template, so it goes round again. The path is what stops an
+        // animation that refers to itself from spinning here.
         Some(text::substitute(&frame, |inner| {
-            self.resolve_at(inner, depth - 1)
+            self.resolve_in(inner, path)
         }))
     }
 
@@ -742,11 +769,11 @@ impl Expression {
     /// a comparison on an unknown placeholder has nothing to compare. The caller
     /// leaves the text alone rather than showing half an answer.
     pub fn test(&self, view: &View<'_>) -> Option<bool> {
-        self.test_at(view, MAX_DEPTH)
+        self.test_in(view, &Path::default())
     }
 
-    fn test_at(&self, view: &View<'_>, depth: u8) -> Option<bool> {
-        let resolve = |side: &str| text::substitute(side, |name| view.resolve_at(name, depth));
+    fn test_in(&self, view: &View<'_>, path: &Path<'_>) -> Option<bool> {
+        let resolve = |side: &str| text::substitute(side, |name| view.resolve_in(name, path));
         match self.compile()? {
             Compiled::Permission { node, held } => Some(view.player?.has_permission(&node) == held),
             Compiled::Compare {
@@ -830,14 +857,14 @@ impl Condition {
     /// an empty `conditions:` list shows up as an unresolved placeholder instead
     /// of silently picking the `true:` text.
     pub fn test(&self, view: &View<'_>) -> Option<bool> {
-        self.test_at(view, MAX_DEPTH)
+        self.test_in(view, &Path::default())
     }
 
-    fn test_at(&self, view: &View<'_>, depth: u8) -> Option<bool> {
+    fn test_in(&self, view: &View<'_>, path: &Path<'_>) -> Option<bool> {
         let mut expressions = self.conditions.iter();
-        let mut held = expressions.next()?.test_at(view, depth)?;
+        let mut held = expressions.next()?.test_in(view, path)?;
         for expression in expressions {
-            let met = expression.test_at(view, depth)?;
+            let met = expression.test_in(view, path)?;
             match self.kind {
                 ConditionKind::And => held &= met,
                 ConditionKind::Or => held |= met,
@@ -846,21 +873,18 @@ impl Condition {
         Some(held)
     }
 
-    /// The chosen text, resolved as a template one level shallower than `depth`.
+    /// The chosen text, resolved as a template.
     ///
-    /// [`None`] at [`MAX_DEPTH`], which is what stops `%condition:a%` whose
-    /// `true:` text is `%condition:a%` from spinning inside a refresh.
-    pub fn resolve(&self, view: &View<'_>, depth: u8) -> Option<String> {
-        if depth == 0 {
-            return None;
-        }
-        let chosen = if self.test_at(view, depth - 1)? {
+    /// `path` already holds this condition, so `%condition:a%` whose `true:` text
+    /// or expression is `%condition:a%` meets itself and stays as written.
+    pub fn resolve(&self, view: &View<'_>, path: &Path<'_>) -> Option<String> {
+        let chosen = if self.test_in(view, path)? {
             &self.when_true
         } else {
             &self.when_false
         };
         Some(text::substitute(chosen, |inner| {
-            view.resolve_at(inner, depth - 1)
+            view.resolve_in(inner, path)
         }))
     }
 }
@@ -891,6 +915,27 @@ mod tests {
         );
         assert_eq!(view.resolve("condition:simple").as_deref(), Some("yes"));
         assert_eq!(view.resolve("condition:nested").as_deref(), Some("works"));
+    }
+
+    #[test]
+    fn nested_conditions_hold_wherever_they_are_reached() {
+        let config = Config::parse(
+            "conditions:\n  simple:\n    conditions: ['1=1']\n    true: 'yes'\n  nested:\n    conditions: ['%condition:simple%=yes']\n    true: 'works'\n    false: 'broken'\n  outer:\n    conditions: ['1=2']\n    true: 'no'\n    false: '%condition:nested%'\nanimations:\n  frame:\n    change-interval: 1000\n    texts: ['%condition:nested%']\n  outer_frame:\n    change-interval: 1000\n    texts: ['%condition:outer%']\n",
+        )
+        .expect("valid");
+        let view = View {
+            config: &config,
+            clock: Clock::start(),
+            server: None,
+            player: None,
+            group: None,
+        };
+        assert_eq!(view.resolve("animation:frame").as_deref(), Some("works"));
+        assert_eq!(view.resolve("condition:outer").as_deref(), Some("works"));
+        assert_eq!(
+            view.resolve("animation:outer_frame").as_deref(),
+            Some("works")
+        );
     }
 
     fn animation(interval: u64, texts: &[&str]) -> Animation {
