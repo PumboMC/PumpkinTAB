@@ -102,8 +102,14 @@ pub fn refresh_all(server: &Server, snapshot: &Snapshot) {
         let view = view_for(snapshot, player, server);
 
         let slots = [
-            batcher.add(&name, local_block(&view, &snapshot.config.header_footer.header)),
-            batcher.add(&name, local_block(&view, &snapshot.config.header_footer.footer)),
+            batcher.add(
+                &name,
+                local_block(&view, &snapshot.config.header_footer.header),
+            ),
+            batcher.add(
+                &name,
+                local_block(&view, &snapshot.config.header_footer.footer),
+            ),
             batcher.add(&name, local_line(&view, &snapshot.config.tab_list.format)),
         ];
         let sidebar = sidebar_slot(snapshot, &mut batcher, &view, &name, &world);
@@ -226,8 +232,14 @@ pub fn apply_player(server: &Server, snapshot: &Snapshot, player: &Player) {
 
     let mut batcher = pie::Batcher::new();
     let slots = [
-        batcher.add(&name, local_block(&view, &snapshot.config.header_footer.header)),
-        batcher.add(&name, local_block(&view, &snapshot.config.header_footer.footer)),
+        batcher.add(
+            &name,
+            local_block(&view, &snapshot.config.header_footer.header),
+        ),
+        batcher.add(
+            &name,
+            local_block(&view, &snapshot.config.header_footer.footer),
+        ),
         batcher.add(&name, local_line(&view, &snapshot.config.tab_list.format)),
     ];
     let sidebar = sidebar_slot(snapshot, &mut batcher, &view, &name, &world);
@@ -356,10 +368,7 @@ fn push_player(player: &Player, row: &Row, resolved: &[String], config: &crate::
     } else {
         // Empty on purpose: see above. The setters take a component and have no
         // "unset" arm, so nothing is the component that says nothing.
-        player.set_tab_list_header_footer(
-            TextComponent::text(""),
-            TextComponent::text(""),
-        );
+        player.set_tab_list_header_footer(TextComponent::text(""), TextComponent::text(""));
     }
 
     if !config.tab_list.applies_in(&row.world) {
@@ -371,8 +380,7 @@ fn push_player(player: &Player, row: &Row, resolved: &[String], config: &crate::
              name was cleared rather than left from the last enabled world. Sort order and \
              latency keep their last values, which affect where they sit and the bar beside \
              them but are not this section's to reset",
-            row.name,
-            row.world
+            row.name, row.world
         );
         return;
     }

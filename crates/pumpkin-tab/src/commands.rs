@@ -32,19 +32,21 @@ use crate::{
 
 /// `/tab`.
 pub fn command() -> Command {
-    Command::new(&["tab".to_string()], "Inspect and reload the PumpkinTAB tab list")
-        .then(CommandNode::literal("reload").execute(Reload))
-        .then(CommandNode::literal("groups").execute(Groups))
-        .then(CommandNode::literal("placeholders").execute(Placeholders))
-        .then(
-            CommandNode::literal("preview")
-                .then(CommandNode::argument("template", greedy()).execute(Preview)),
-        )
-        .then(
-            CommandNode::literal("check").then(
-                CommandNode::argument("player", single_word()).execute(Check),
-            ),
-        )
+    Command::new(
+        &["tab".to_string()],
+        "Inspect and reload the PumpkinTAB tab list",
+    )
+    .then(CommandNode::literal("reload").execute(Reload))
+    .then(CommandNode::literal("groups").execute(Groups))
+    .then(CommandNode::literal("placeholders").execute(Placeholders))
+    .then(
+        CommandNode::literal("preview")
+            .then(CommandNode::argument("template", greedy()).execute(Preview)),
+    )
+    .then(
+        CommandNode::literal("check")
+            .then(CommandNode::argument("player", single_word()).execute(Check)),
+    )
 }
 
 fn single_word() -> &'static pumpkin_plugin_api::command::ArgumentType {
@@ -142,12 +144,18 @@ impl CommandHandler for Groups {
         _args: ConsumedArgs,
     ) -> Result<i32, CommandError> {
         let Some(snapshot) = state::snapshot() else {
-            return soft_error(&sender, "PumpkinTAB has no state; it did not finish loading.");
+            return soft_error(
+                &sender,
+                "PumpkinTAB has no state; it did not finish loading.",
+            );
         };
         let config = &snapshot.config;
 
         if config.groups_by_order().is_empty() {
-            reply(&sender, "No groups are configured; everyone is in the default group.");
+            reply(
+                &sender,
+                "No groups are configured; everyone is in the default group.",
+            );
             return Ok(0);
         }
 
@@ -194,7 +202,10 @@ impl CommandHandler for Placeholders {
         _args: ConsumedArgs,
     ) -> Result<i32, CommandError> {
         let Some(snapshot) = state::snapshot() else {
-            return soft_error(&sender, "PumpkinTAB has no state; it did not finish loading.");
+            return soft_error(
+                &sender,
+                "PumpkinTAB has no state; it did not finish loading.",
+            );
         };
 
         let mut message = format!(
@@ -243,11 +254,19 @@ impl CommandHandler for Preview {
         args: ConsumedArgs,
     ) -> Result<i32, CommandError> {
         let Some(snapshot) = state::snapshot() else {
-            return soft_error(&sender, "PumpkinTAB has no state; it did not finish loading.");
+            return soft_error(
+                &sender,
+                "PumpkinTAB has no state; it did not finish loading.",
+            );
         };
         let template = match args.get_value("template") {
             pumpkin_plugin_api::command::Arg::Simple(value) if !value.is_empty() => value,
-            _ => return soft_error(&sender, "give a template to preview, in quotes if it has spaces"),
+            _ => {
+                return soft_error(
+                    &sender,
+                    "give a template to preview, in quotes if it has spaces",
+                );
+            }
         };
 
         let view = View {
@@ -290,7 +309,10 @@ impl CommandHandler for Check {
         args: ConsumedArgs,
     ) -> Result<i32, CommandError> {
         let Some(snapshot) = state::snapshot() else {
-            return soft_error(&sender, "PumpkinTAB has no state; it did not finish loading.");
+            return soft_error(
+                &sender,
+                "PumpkinTAB has no state; it did not finish loading.",
+            );
         };
         let name = match args.get_value("player") {
             pumpkin_plugin_api::command::Arg::Simple(value) if !value.is_empty() => value,
@@ -327,10 +349,7 @@ impl CommandHandler for Check {
         });
         message.push_str(&format!("\nsort order: {sort}"));
         message.push_str(&format!("\nworld: {world}"));
-        message.push_str(&format!(
-            "\nping: {}",
-            describe_ping(handle.get_ping())
-        ));
+        message.push_str(&format!("\nping: {}", describe_ping(handle.get_ping())));
         message.push_str(&format!(
             "\nheader/footer here: {}",
             yes_no(snapshot.config.header_footer.applies_in(&world))
@@ -363,4 +382,3 @@ fn describe_ping(millis: u32) -> String {
         format!("{millis}ms")
     }
 }
-

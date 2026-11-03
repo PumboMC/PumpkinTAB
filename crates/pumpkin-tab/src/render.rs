@@ -143,8 +143,22 @@ pub const MAX_DEPTH: u8 = 2;
 /// answers, and [`BUILT_IN_ALIASES`] are in it because an alias answers just as
 /// much as a first-class name does.
 pub const BUILT_INS: [&str; 17] = [
-    "player", "viewer", "ping", "world", "uuid", "permission_level", "health", "gamemode",
-    "player_ip", "bedrock", "group", "online", "max_players", "worldonline", "server_name", "tps",
+    "player",
+    "viewer",
+    "ping",
+    "world",
+    "uuid",
+    "permission_level",
+    "health",
+    "gamemode",
+    "player_ip",
+    "bedrock",
+    "group",
+    "online",
+    "max_players",
+    "worldonline",
+    "server_name",
+    "tps",
     "mspt",
 ];
 
@@ -258,10 +272,15 @@ impl View<'_> {
         if depth == 0 {
             return None;
         }
-        let frame = frame_text(self.config.animations.get(animation)?, self.clock.elapsed_ms())?;
+        let frame = frame_text(
+            self.config.animations.get(animation)?,
+            self.clock.elapsed_ms(),
+        )?;
         // A frame is a template, so it goes round again. The depth guard is what
         // stops an animation that refers to itself from spinning here.
-        Some(text::substitute(&frame, |inner| self.resolve_at(inner, depth - 1)))
+        Some(text::substitute(&frame, |inner| {
+            self.resolve_at(inner, depth - 1)
+        }))
     }
 
     fn built_in(&self, name: &str) -> Option<String> {
@@ -290,7 +309,9 @@ impl View<'_> {
             // The op level, as the number the config uses, so
             // `%permission_level%>=2` means exactly what `op-level-groups`'s
             // `two:` means.
-            "permission_level" => player.map(|player| op_level(player.get_permission_level()).to_string()),
+            "permission_level" => {
+                player.map(|player| op_level(player.get_permission_level()).to_string())
+            }
             // Rounded up, because that is what the heart display shows and a
             // `6.5` in a tab list is not what anybody is looking at.
             "health" => player.map(|player| player.get_health().ceil().to_string()),
@@ -589,10 +610,7 @@ impl Operator {
     fn is_numeric(self) -> bool {
         matches!(
             self,
-            Self::GreaterThanOrEqual
-                | Self::GreaterThan
-                | Self::LessThanOrEqual
-                | Self::LessThan
+            Self::GreaterThanOrEqual | Self::GreaterThan | Self::LessThanOrEqual | Self::LessThan
         )
     }
 
@@ -745,10 +763,7 @@ enum Compiled {
     },
     /// A node check: `permission:<node>`, or `!permission:<node>` when the node
     /// must **not** be held.
-    Permission {
-        node: String,
-        held: bool,
-    },
+    Permission { node: String, held: bool },
 }
 
 /// The two sides of `text` around the first `symbol` outside a `%…%`.
@@ -834,7 +849,9 @@ impl Condition {
         } else {
             &self.when_false
         };
-        Some(text::substitute(chosen, |inner| view.resolve_at(inner, depth - 1)))
+        Some(text::substitute(chosen, |inner| {
+            view.resolve_at(inner, depth - 1)
+        }))
     }
 }
 
@@ -944,9 +961,23 @@ mod tests {
     #[test]
     fn every_built_in_has_an_arm_and_every_arm_is_listed() {
         const ARMED: [&str; 17] = [
-            "player", "viewer", "ping", "world", "uuid", "permission_level", "health",
-            "gamemode", "player_ip", "bedrock", "group", "online", "max_players", "worldonline",
-            "server_name", "tps", "mspt",
+            "player",
+            "viewer",
+            "ping",
+            "world",
+            "uuid",
+            "permission_level",
+            "health",
+            "gamemode",
+            "player_ip",
+            "bedrock",
+            "group",
+            "online",
+            "max_players",
+            "worldonline",
+            "server_name",
+            "tps",
+            "mspt",
         ];
         let mut expected: Vec<&str> = ARMED.into();
         // An alias resolves before the match, so it is never an arm of its own -
@@ -967,7 +998,11 @@ mod tests {
     #[test]
     fn the_condition_prefix_is_not_a_built_in() {
         assert!(!BUILT_INS.contains(&CONDITION_PREFIX));
-        assert!(!BUILT_IN_ALIASES.iter().any(|(alias, _)| alias.contains(":")));
+        assert!(
+            !BUILT_IN_ALIASES
+                .iter()
+                .any(|(alias, _)| alias.contains(":"))
+        );
     }
 
     #[test]
@@ -990,8 +1025,16 @@ mod tests {
     #[test]
     fn the_names_and_the_count_agree() {
         for text in ["%a% and %b%", "%a% and %a%", "none", "50% off %a%", "%a%!"] {
-            assert_eq!(count_placeholders(text), placeholder_names(text).len(), "{text}");
-            assert_eq!(has_placeholder(text), !placeholder_names(text).is_empty(), "{text}");
+            assert_eq!(
+                count_placeholders(text),
+                placeholder_names(text).len(),
+                "{text}"
+            );
+            assert_eq!(
+                has_placeholder(text),
+                !placeholder_names(text).is_empty(),
+                "{text}"
+            );
         }
         assert_eq!(placeholder_names("%a% and %a%"), ["a", "a"]);
         assert_eq!(placeholder_names("50% off %a%"), ["a"]);
@@ -1029,7 +1072,10 @@ mod tests {
             "%nope%Steve"
         );
         // `nope` is not in the list, so it stays as written.
-        assert_eq!(hide_unresolved("%balance%Steve", &["perm_prefix".to_string()]), "%balance%Steve");
+        assert_eq!(
+            hide_unresolved("%balance%Steve", &["perm_prefix".to_string()]),
+            "%balance%Steve"
+        );
     }
 
     #[test]
@@ -1087,7 +1133,10 @@ mod tests {
     fn a_blank_spacer_line_survives_an_unresolved_placeholder_elsewhere() {
         let header = "rule\ntitle\n%unanswered%";
         // Nothing listed matches, so the block must come back untouched.
-        assert_eq!(hide_unresolved(header, &["perm_prefix".to_string()]), header);
+        assert_eq!(
+            hide_unresolved(header, &["perm_prefix".to_string()]),
+            header
+        );
 
         let header_with_trailing_blank = "rule\ntitle\n%unanswered%\n";
         assert_eq!(
@@ -1134,7 +1183,10 @@ mod tests {
     }
 
     fn shipped_autohide() -> Vec<String> {
-        DEFAULT_AUTOHIDE.iter().map(|name| (*name).to_string()).collect()
+        DEFAULT_AUTOHIDE
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect()
     }
 
     // ---- conditions -------------------------------------------------------
@@ -1188,7 +1240,11 @@ mod tests {
     #[test]
     fn a_negated_comparison_is_not_read_as_the_bare_operator_inside_it() {
         for (text, expected, sides) in [
-            ("%world%!<-lobby-", Operator::NotContains, ("%world%", "lobby-")),
+            (
+                "%world%!<-lobby-",
+                Operator::NotContains,
+                ("%world%", "lobby-"),
+            ),
             ("%world%<-lobby-", Operator::Contains, ("%world%", "lobby-")),
             ("%ping%>=50", Operator::GreaterThanOrEqual, ("%ping%", "50")),
             ("%ping%<=50", Operator::LessThanOrEqual, ("%ping%", "50")),
@@ -1246,7 +1302,10 @@ mod tests {
         );
         // The percent guard: an operator character inside a placeholder is not
         // the operator.
-        assert_eq!(split("%a%=b", "="), Some(("%a%".to_string(), "b".to_string())));
+        assert_eq!(
+            split("%a%=b", "="),
+            Some(("%a%".to_string(), "b".to_string()))
+        );
         assert_eq!(split("no operator here", ">="), None);
         // An unbalanced `%` swallows the rest, which is why a condition cannot
         // compare against a literal containing one.
@@ -1308,7 +1367,14 @@ mod tests {
 
     #[test]
     fn a_malformed_expression_is_reported_rather_than_guessed_at() {
-        for bad in ["", "   ", "just some text", "%ping%", "permission:", "  !permission: "] {
+        for bad in [
+            "",
+            "   ",
+            "just some text",
+            "%ping%",
+            "permission:",
+            "  !permission: ",
+        ] {
             let expression = Expression::new(bad);
             assert_eq!(expression.compile(), None, "{bad:?} should not compile");
             let problem = expression.problem().expect("a complaint");
@@ -1345,7 +1411,10 @@ mod tests {
         let expression = Expression::new("%ping%<50");
         let yaml = serde_norway::to_string(&expression).expect("serialises");
         assert_eq!(yaml.trim(), "'%ping%<50'");
-        assert_eq!(serde_norway::from_str::<Expression>(&yaml).unwrap(), expression);
+        assert_eq!(
+            serde_norway::from_str::<Expression>(&yaml).unwrap(),
+            expression
+        );
     }
 
     /// One operator and the outcomes it has to produce, in the order the cases
@@ -1357,16 +1426,52 @@ mod tests {
     #[test]
     fn every_comparator_evaluates_both_ways() {
         let cases: [(Operator, &[Outcome<'_>]); 12] = [
-            (Operator::GreaterThanOrEqual, &[("2", "2", true), ("3", "2", true), ("1", "2", false)]),
-            (Operator::GreaterThan, &[("2", "2", false), ("3", "2", true), ("1", "2", false)]),
-            (Operator::LessThanOrEqual, &[("2", "2", true), ("1", "2", true), ("3", "2", false)]),
-            (Operator::LessThan, &[("2", "2", false), ("1", "2", true), ("3", "2", false)]),
-            (Operator::NotContains, &[("lobby-1", "lobby-", false), ("world", "lobby-", true)]),
-            (Operator::NotStartsWith, &[("lobby-1", "lobby-", false), ("x-lobby", "lobby-", true)]),
-            (Operator::NotEndsWith, &[("world_nether", "nether", false), ("nether_x", "nether", true)]),
-            (Operator::Contains, &[("lobby-1", "lobby-", true), ("world", "lobby-", false)]),
-            (Operator::StartsWith, &[("lobby-1", "lobby-", true), ("x-lobby", "lobby-", false)]),
-            (Operator::EndsWith, &[("world_nether", "nether", true), ("nether_x", "nether", false)]),
+            (
+                Operator::GreaterThanOrEqual,
+                &[("2", "2", true), ("3", "2", true), ("1", "2", false)],
+            ),
+            (
+                Operator::GreaterThan,
+                &[("2", "2", false), ("3", "2", true), ("1", "2", false)],
+            ),
+            (
+                Operator::LessThanOrEqual,
+                &[("2", "2", true), ("1", "2", true), ("3", "2", false)],
+            ),
+            (
+                Operator::LessThan,
+                &[("2", "2", false), ("1", "2", true), ("3", "2", false)],
+            ),
+            (
+                Operator::NotContains,
+                &[("lobby-1", "lobby-", false), ("world", "lobby-", true)],
+            ),
+            (
+                Operator::NotStartsWith,
+                &[("lobby-1", "lobby-", false), ("x-lobby", "lobby-", true)],
+            ),
+            (
+                Operator::NotEndsWith,
+                &[
+                    ("world_nether", "nether", false),
+                    ("nether_x", "nether", true),
+                ],
+            ),
+            (
+                Operator::Contains,
+                &[("lobby-1", "lobby-", true), ("world", "lobby-", false)],
+            ),
+            (
+                Operator::StartsWith,
+                &[("lobby-1", "lobby-", true), ("x-lobby", "lobby-", false)],
+            ),
+            (
+                Operator::EndsWith,
+                &[
+                    ("world_nether", "nether", true),
+                    ("nether_x", "nether", false),
+                ],
+            ),
             (Operator::NotEquals, &[("a", "a", false), ("a", "b", true)]),
             (Operator::Equals, &[("a", "a", true), ("a", "b", false)]),
         ];

@@ -193,7 +193,9 @@ fn report_unresolved(resolved: &[String]) {
     // Not `.unwrap()`: a panic while the lock was held would otherwise turn every
     // later report into a panic of its own, which is a worse outcome than a
     // duplicated log line.
-    let mut state = REPORTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut state = REPORTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let fresh = fresh_names(&mut state, generation, &names);
     if fresh.is_empty() {
         return;
@@ -206,7 +208,11 @@ fn report_unresolved(resolved: &[String]) {
          needs PumpkinPerm loaded as well. Each is named at most once every {REPORT_EVERY} \
          refreshes.",
         listed.join(", "),
-        if listed.len() == 1 { "it is" } else { "they are" },
+        if listed.len() == 1 {
+            "it is"
+        } else {
+            "they are"
+        },
     );
 }
 
@@ -337,7 +343,10 @@ mod tests {
         assert_eq!(fresh_names(&mut state, 0, &names(&["a", "b"])), ["a", "b"]);
         // The same window again, with the same names plus a new one.
         assert_eq!(fresh_names(&mut state, 0, &names(&["a", "b", "c"])), ["c"]);
-        assert_eq!(fresh_names(&mut state, 0, &names(&["a", "b", "c"])), Vec::<String>::new());
+        assert_eq!(
+            fresh_names(&mut state, 0, &names(&["a", "b", "c"])),
+            Vec::<String>::new()
+        );
     }
 
     /// The next window names them again, which is the other half: a name that has
@@ -370,7 +379,10 @@ mod tests {
     #[test]
     fn a_nothing_left_batch_names_nothing() {
         let mut state = None;
-        assert_eq!(fresh_names(&mut state, 0, &names(&[])), Vec::<String>::new());
+        assert_eq!(
+            fresh_names(&mut state, 0, &names(&[])),
+            Vec::<String>::new()
+        );
         assert!(state.is_none(), "an empty batch touched the window");
     }
 

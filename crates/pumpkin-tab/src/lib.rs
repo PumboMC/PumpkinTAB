@@ -100,8 +100,8 @@ use std::{collections::BTreeSet, sync::OnceLock};
 
 use pumpkin_plugin_api::{
     Context, Plugin, PluginMetadata, Result, Server,
-    permission::PermissionDefault,
     events::{EventData, EventPriority, PlayerJoinEvent, PlayerLeaveEvent},
+    permission::PermissionDefault,
     player::Player,
 };
 use tracing::{debug, error, info, warn};
@@ -109,18 +109,18 @@ use tracing::{debug, error, info, warn};
 #[cfg(target_arch = "wasm32")]
 use pumpkin_plugin_api::register_plugin;
 
+/// The shared bossbar.
+pub mod bossbar;
 /// Command registration and the handlers behind it.
 pub mod commands;
 /// The configuration and its models.
 pub mod config;
 /// Which group a player is shown as.
 pub mod groups;
-/// The shared bossbar.
-pub mod bossbar;
-/// Placeholder resolution.
-pub mod render;
 /// Asking PumpkinPIE for whatever the built-ins could not answer.
 pub mod pie;
+/// Placeholder resolution.
+pub mod render;
 /// The sidebar.
 pub mod scoreboard;
 /// The plugin's state.
@@ -179,10 +179,7 @@ pub fn reload() -> Option<(bool, Vec<String>)> {
         restart_refresh(refresh);
         return Some((true, Vec::new()));
     };
-    Some((
-        false,
-        vec![format!("{}: {problem}", config::CONFIG_FILE)],
-    ))
+    Some((false, vec![format!("{}: {problem}", config::CONFIG_FILE)]))
 }
 
 /// Cancels the live refresh and arms a new one every `ticks` ticks.
@@ -314,7 +311,11 @@ fn ensure_scoreboard(snapshot: &state::Snapshot, server: &Server) {
         let made = if snapshot.owns_player(&name) {
             state::with_scoreboard(&name, |handle| {
                 scoreboard::create(
-                    handle, &snapshot.config.scoreboard, &view, previous_lines, true,
+                    handle,
+                    &snapshot.config.scoreboard,
+                    &view,
+                    previous_lines,
+                    true,
                 )
             })
         } else {
@@ -454,8 +455,16 @@ impl Plugin for PumpkinTAB {
 
         // Join is blocking so the tab list is right before the player sees it;
         // leave is not, because nothing needs to be in place afterwards.
-        context.register_event_handler::<PlayerJoinEvent, _>(OnJoin, EventPriority::Normal, true)?;
-        context.register_event_handler::<PlayerLeaveEvent, _>(OnLeave, EventPriority::Low, false)?;
+        context.register_event_handler::<PlayerJoinEvent, _>(
+            OnJoin,
+            EventPriority::Normal,
+            true,
+        )?;
+        context.register_event_handler::<PlayerLeaveEvent, _>(
+            OnLeave,
+            EventPriority::Low,
+            false,
+        )?;
 
         // The refresh loop. Twenty ticks is one second and is the floor the config
         // can ask for; every setter here broadcasts to the world, so a faster
@@ -546,7 +555,11 @@ fn operator_default() -> PermissionDefault {
 struct OnJoin;
 
 impl pumpkin_plugin_api::EventHandler<PlayerJoinEvent> for OnJoin {
-    fn handle(&self, server: Server, event: EventData<PlayerJoinEvent>) -> EventData<PlayerJoinEvent> {
+    fn handle(
+        &self,
+        server: Server,
+        event: EventData<PlayerJoinEvent>,
+    ) -> EventData<PlayerJoinEvent> {
         apply(&server, &event.player);
         event
     }

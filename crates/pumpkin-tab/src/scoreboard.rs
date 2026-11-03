@@ -176,11 +176,7 @@ pub fn line_team(index: usize) -> String {
 /// literal `1` on screen, which is not the same thing at all.
 pub fn line_key(index: usize) -> String {
     let number = index + 1;
-    format!(
-        "\u{a7}{}\u{a7}{}\u{a7}r",
-        number / 10 % 10,
-        number % 10
-    )
+    format!("\u{a7}{}\u{a7}{}\u{a7}r", number / 10 % 10, number % 10)
 }
 
 /// One entry of `lines:`, parsed from TAB's syntax.
@@ -237,7 +233,8 @@ pub fn parse_line(raw: &str) -> Line<'_> {
 /// `total` is every row on the board, lines and players together, so a line and a
 /// player can never land on the same value.
 pub fn line_score(line: &Line<'_>, index: usize, total: usize) -> i32 {
-    line.score.unwrap_or_else(|| total.saturating_sub(index) as i32)
+    line.score
+        .unwrap_or_else(|| total.saturating_sub(index) as i32)
 }
 
 /// Whether a line should be on the board at all this refresh.
@@ -515,7 +512,6 @@ pub fn scores_are_distinct(lines: usize, players: usize) -> bool {
     values.len() == before
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -690,6 +686,10 @@ mod tests {
     #[test]
     fn the_objective_name_is_short_and_protocol_safe() {
         assert!(OBJECTIVE.len() <= 16);
-        assert!(OBJECTIVE.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'));
+        assert!(
+            OBJECTIVE
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        );
     }
 }

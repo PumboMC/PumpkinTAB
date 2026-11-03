@@ -99,7 +99,10 @@ pub fn resolve<'a>(config: &'a Config, player: &Player) -> Resolved<'a> {
     // operator shows as an admin without anyone having run `/pumpkinperm set`.
     for (configured, name) in &config.op_level_groups {
         if level >= level_of(*configured)
-            && let Some(index) = config.groups_by_order().iter().position(|listed| listed == name)
+            && let Some(index) = config
+                .groups_by_order()
+                .iter()
+                .position(|listed| listed == name)
         {
             return Resolved {
                 name,
@@ -144,7 +147,10 @@ pub fn name_problem(name: &str) -> Option<String> {
         return Some("the name is empty".to_string());
     }
     if name.len() > 64 {
-        return Some(format!("the name is {} characters, the limit is 64", name.len()));
+        return Some(format!(
+            "the name is {} characters, the limit is 64",
+            name.len()
+        ));
     }
     if let Some(bad) = name
         .bytes()
@@ -173,7 +179,10 @@ mod tests {
 
     #[test]
     fn the_list_order_is_the_order() {
-        assert_eq!(config().groups_by_order(), ["owner", "admin", "vip", "default"]);
+        assert_eq!(
+            config().groups_by_order(),
+            ["owner", "admin", "vip", "default"]
+        );
     }
 
     #[test]

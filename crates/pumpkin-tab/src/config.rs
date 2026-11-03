@@ -220,7 +220,6 @@ bossbar:
   disabled-worlds: []
 "####,
     },
-
     Superseded {
         label: "the default whose clock was 24-hour UTC with no offset",
         // The file as it was before `utc-offset-hours` was added and the clock
@@ -1044,7 +1043,9 @@ impl Config {
         // slightly wrong is left on screen as literal `<gray8>`.
         for (where_, template) in self.templates() {
             for tag in crate::text::unknown_tags(template) {
-                problems.push(format!("{where_}: '<{tag}>' is not a tag, so it shows as text"));
+                problems.push(format!(
+                    "{where_}: '<{tag}>' is not a tag, so it shows as text"
+                ));
             }
         }
 
@@ -1246,7 +1247,10 @@ pub struct TabList {
 }
 
 fn default_autohide() -> Vec<String> {
-    DEFAULT_AUTOHIDE.iter().map(|name| (*name).to_string()).collect()
+    DEFAULT_AUTOHIDE
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect()
 }
 
 impl Default for TabList {
@@ -1519,7 +1523,10 @@ mod tests {
         let config = Config::parse(DEFAULT_CONFIG).expect("the shipped config.yml is valid");
         assert!(config.header_footer.enabled);
         assert_eq!(config.refresh_ticks(), DEFAULT_REFRESH_TICKS);
-        assert!(config.animations.contains_key("logo"), "the shipped config has no logo animation");
+        assert!(
+            config.animations.contains_key("logo"),
+            "the shipped config has no logo animation"
+        );
         assert!(
             config.animations.contains_key("barcolors"),
             "the shipped config has no barcolors animation, which bossbar.color points at"
@@ -1714,8 +1721,8 @@ mod tests {
 
         // An explicit `0` is still clamped and still reported, so this change
         // has not removed the check for a number an admin really did type.
-        let explicit = Config::parse("groups: [default]\nrefresh-interval-ticks: 0\n")
-            .expect("valid");
+        let explicit =
+            Config::parse("groups: [default]\nrefresh-interval-ticks: 0\n").expect("valid");
         assert_eq!(explicit.refresh_ticks(), MIN_REFRESH_TICKS);
         assert!(
             !explicit.problems().is_empty(),
@@ -1734,653 +1741,676 @@ mod tests {
         );
     }
 
-/// The two plugins agree on one string, and it is the only thing between them.
-///
-/// PumpkinPerm grants `<its own name>:group.<name>` and PumpkinTAB asks the permission
-/// manager about exactly that. Nothing connects the two at compile time, they are
-/// separate builds, and the failure is invisible: a mismatch means no player ever
-/// matches a group, so **everybody falls back to `default` with no error in the
-/// log**. The host matches node names case-sensitively too, so a case difference
-/// breaks it the same way.
-///
-/// This is the assertion that would have caught a rename applied to one plugin and
-/// not the other. It lives in both repos for the same reason.
-#[test]
-fn the_permission_plugin_name_is_the_one_pumpkinperm_uses() {
-    assert_eq!(PERM_PLUGIN, "PumpkinPerm");
-    assert_eq!(
-        Config::default().node_for("admin").as_deref(),
-        Some("PumpkinPerm:group.admin")
-    );
-    // The namespace the host will accept, character for character.
-    assert!(PERM_PLUGIN.starts_with(char::is_uppercase), "the host is case sensitive");
-    assert!(!PERM_PLUGIN.contains(char::is_whitespace));
-}
-
-#[test]
-fn the_shipped_groups_point_at_pumpkinperm() {
-    let config = Config::parse(DEFAULT_CONFIG).expect("valid");
-    for name in config.groups_by_order() {
+    /// The two plugins agree on one string, and it is the only thing between them.
+    ///
+    /// PumpkinPerm grants `<its own name>:group.<name>` and PumpkinTAB asks the permission
+    /// manager about exactly that. Nothing connects the two at compile time, they are
+    /// separate builds, and the failure is invisible: a mismatch means no player ever
+    /// matches a group, so **everybody falls back to `default` with no error in the
+    /// log**. The host matches node names case-sensitively too, so a case difference
+    /// breaks it the same way.
+    ///
+    /// This is the assertion that would have caught a rename applied to one plugin and
+    /// not the other. It lives in both repos for the same reason.
+    #[test]
+    fn the_permission_plugin_name_is_the_one_pumpkinperm_uses() {
+        assert_eq!(PERM_PLUGIN, "PumpkinPerm");
         assert_eq!(
-            config.node_for(name).as_deref(),
-            Some(format!("{}:group.{name}", PERM_PLUGIN).as_str()),
-            "{name} does not resolve to the group node of {PERM_PLUGIN}"
+            Config::default().node_for("admin").as_deref(),
+            Some("PumpkinPerm:group.admin")
+        );
+        // The namespace the host will accept, character for character.
+        assert!(
+            PERM_PLUGIN.starts_with(char::is_uppercase),
+            "the host is case sensitive"
+        );
+        assert!(!PERM_PLUGIN.contains(char::is_whitespace));
+    }
+
+    #[test]
+    fn the_shipped_groups_point_at_pumpkinperm() {
+        let config = Config::parse(DEFAULT_CONFIG).expect("valid");
+        for name in config.groups_by_order() {
+            assert_eq!(
+                config.node_for(name).as_deref(),
+                Some(format!("{}:group.{name}", PERM_PLUGIN).as_str()),
+                "{name} does not resolve to the group node of {PERM_PLUGIN}"
+            );
+        }
+    }
+
+    /// The shipped config sets no `op-level-groups`, deliberately.
+    ///
+    /// The key still works - it is parsed and `groups::resolve` still honours it - but
+    /// an operator is not given a group for free here. Op is a server-wide switch
+    /// rather than a per-player rank, so mapping it onto the top of this ladder means
+    /// everybody who can fly gets the owner tag. A server that wants it writes:
+    /// `op-level-groups: {4: owner, 2: admin}`.
+    #[test]
+    fn the_shipped_config_maps_no_op_level() {
+        let config = Config::parse(DEFAULT_CONFIG).expect("valid");
+        assert!(
+            config.op_level_groups.is_empty(),
+            "the shipped config should not hand a group to an operator by default: {:?}",
+            config.op_level_groups
+        );
+        // An operator still resolves to the fallback rather than to nothing.
+        assert_eq!(
+            config.groups_by_order().last().map(String::as_str),
+            Some(DEFAULT_GROUP)
         );
     }
-}
 
-/// The shipped config sets no `op-level-groups`, deliberately.
-///
-/// The key still works - it is parsed and `groups::resolve` still honours it - but
-/// an operator is not given a group for free here. Op is a server-wide switch
-/// rather than a per-player rank, so mapping it onto the top of this ladder means
-/// everybody who can fly gets the owner tag. A server that wants it writes:
-/// `op-level-groups: {4: owner, 2: admin}`.
-#[test]
-fn the_shipped_config_maps_no_op_level() {
-    let config = Config::parse(DEFAULT_CONFIG).expect("valid");
-    assert!(
-        config.op_level_groups.is_empty(),
-        "the shipped config should not hand a group to an operator by default: {:?}",
-        config.op_level_groups
-    );
-    // An operator still resolves to the fallback rather than to nothing.
-    assert_eq!(config.groups_by_order().last().map(String::as_str), Some(DEFAULT_GROUP));
-}
-
-/// A group prefix would be defined twice - here and in PumpkinPerm - and the two
-/// copies would eventually disagree. PumpkinTAB carries names and nothing else.
-#[test]
-fn a_group_carries_a_name_and_nothing_else() {
-    let config = Config::parse(DEFAULT_CONFIG).expect("valid");
-    let text = serde_norway::to_string(&config.groups).expect("serialises");
-    for banned in ["prefix", "suffix", "order", "permission", "min-op-level"] {
-        assert!(!text.contains(banned), "a group entry carries `{banned}`");
+    /// A group prefix would be defined twice - here and in PumpkinPerm - and the two
+    /// copies would eventually disagree. PumpkinTAB carries names and nothing else.
+    #[test]
+    fn a_group_carries_a_name_and_nothing_else() {
+        let config = Config::parse(DEFAULT_CONFIG).expect("valid");
+        let text = serde_norway::to_string(&config.groups).expect("serialises");
+        for banned in ["prefix", "suffix", "order", "permission", "min-op-level"] {
+            assert!(!text.contains(banned), "a group entry carries `{banned}`");
+        }
+        // A bare list of strings, not a list of objects.
+        assert!(!text.contains('{'), "{text}");
     }
-    // A bare list of strings, not a list of objects.
-    assert!(!text.contains('{'), "{text}");
-}
 
-/// Sorting is not optional, so there is nothing to configure.
-#[test]
-fn there_is_no_sorting_section() {
-    assert!(Config::parse("sorting:\n  enabled: true\n").is_err());
-    assert!(Config::parse("sorting:\n  reversed: true\n").is_err());
-}
+    /// Sorting is not optional, so there is nothing to configure.
+    #[test]
+    fn there_is_no_sorting_section() {
+        assert!(Config::parse("sorting:\n  enabled: true\n").is_err());
+        assert!(Config::parse("sorting:\n  reversed: true\n").is_err());
+    }
 
-#[test]
-fn an_unknown_key_is_rejected_rather_than_ignored() {
-    let error = Config::parse("header-footer:\n  enabld: true\n").unwrap_err();
-    assert!(error.contains("enabld"), "{error}");
-}
+    #[test]
+    fn an_unknown_key_is_rejected_rather_than_ignored() {
+        let error = Config::parse("header-footer:\n  enabld: true\n").unwrap_err();
+        assert!(error.contains("enabld"), "{error}");
+    }
 
-#[test]
-fn the_old_group_shape_is_rejected() {
-    // An upgrading admin has the previous list-of-maps in their config.yml.
-    // It must be refused rather than silently read as a group named
-    // something empty, so the error has to name the offending entry.
-    let error = Config::parse("groups:\n  - name: vip\n    order: 1\n").unwrap_err();
-    assert!(error.contains("groups[0]"), "{error}");
-    assert!(error.contains("string"), "{error}");
-}
+    #[test]
+    fn the_old_group_shape_is_rejected() {
+        // An upgrading admin has the previous list-of-maps in their config.yml.
+        // It must be refused rather than silently read as a group named
+        // something empty, so the error has to name the offending entry.
+        let error = Config::parse("groups:\n  - name: vip\n    order: 1\n").unwrap_err();
+        assert!(error.contains("groups[0]"), "{error}");
+        assert!(error.contains("string"), "{error}");
+    }
 
-#[test]
-fn a_zero_refresh_is_raised_rather_than_dividing_by_nothing() {
-    let config = Config::parse("refresh-interval-ticks: 0").expect("valid");
-    assert_eq!(config.refresh_ticks(), MIN_REFRESH_TICKS);
-    assert!(config.problems().iter().any(|problem| problem.contains("raised")));
-}
+    #[test]
+    fn a_zero_refresh_is_raised_rather_than_dividing_by_nothing() {
+        let config = Config::parse("refresh-interval-ticks: 0").expect("valid");
+        assert_eq!(config.refresh_ticks(), MIN_REFRESH_TICKS);
+        assert!(
+            config
+                .problems()
+                .iter()
+                .any(|problem| problem.contains("raised"))
+        );
+    }
 
-#[test]
-fn two_groups_with_one_name_is_reported() {
-    let config = Config::parse("groups: [vip, vip]\n").expect("valid");
-    assert!(
-        config
-            .problems()
-            .iter()
-            .any(|problem| problem.contains("listed in `groups` twice")),
-        "{:?}",
-        config.problems()
-    );
-}
+    #[test]
+    fn two_groups_with_one_name_is_reported() {
+        let config = Config::parse("groups: [vip, vip]\n").expect("valid");
+        assert!(
+            config
+                .problems()
+                .iter()
+                .any(|problem| problem.contains("listed in `groups` twice")),
+            "{:?}",
+            config.problems()
+        );
+    }
 
-/// `default` is now just a listed group, so a second one under another name is a
-/// mistake rather than a shadow.
-#[test]
-fn two_spellings_of_default_are_reported() {
-    let config = Config::parse("groups: [vip, default, Default]\n").expect("valid");
-    assert!(
-        config
-            .problems()
-            .iter()
-            .any(|problem| problem.contains("should be written 'default'")),
-        "{:?}",
-        config.problems()
-    );
-}
+    /// `default` is now just a listed group, so a second one under another name is a
+    /// mistake rather than a shadow.
+    #[test]
+    fn two_spellings_of_default_are_reported() {
+        let config = Config::parse("groups: [vip, default, Default]\n").expect("valid");
+        assert!(
+            config
+                .problems()
+                .iter()
+                .any(|problem| problem.contains("should be written 'default'")),
+            "{:?}",
+            config.problems()
+        );
+    }
 
-#[test]
-fn an_empty_animation_is_reported() {
-    let config = Config::parse("animations:\n  logo:\n    texts: []\n").expect("valid");
-    assert!(
-        config
-            .problems()
-            .iter()
-            .any(|problem| problem.contains("no `texts`")),
-        "{:?}",
-        config.problems()
-    );
-}
+    #[test]
+    fn an_empty_animation_is_reported() {
+        let config = Config::parse("animations:\n  logo:\n    texts: []\n").expect("valid");
+        assert!(
+            config
+                .problems()
+                .iter()
+                .any(|problem| problem.contains("no `texts`")),
+            "{:?}",
+            config.problems()
+        );
+    }
 
-#[test]
-fn a_zero_interval_is_reported_and_clamped() {
-    let config = Config::parse(
-        "animations:\n  logo:\n    change-interval: 0\n    texts: ['a']\n",
-    )
-    .expect("valid");
-    assert_eq!(config.animations["logo"].interval_ms(), 1);
-    assert!(
-        config
-            .problems()
-            .iter()
-            .any(|problem| problem.contains("cannot advance")),
-        "{:?}",
-        config.problems()
-    );
-}
+    #[test]
+    fn a_zero_interval_is_reported_and_clamped() {
+        let config =
+            Config::parse("animations:\n  logo:\n    change-interval: 0\n    texts: ['a']\n")
+                .expect("valid");
+        assert_eq!(config.animations["logo"].interval_ms(), 1);
+        assert!(
+            config
+                .problems()
+                .iter()
+                .any(|problem| problem.contains("cannot advance")),
+            "{:?}",
+            config.problems()
+        );
+    }
 
-#[test]
-fn an_unknown_render_type_is_reported() {
-    let config =
-        Config::parse("scoreboard:\n  enabled: true\n  render-type: pixels\n").expect("valid");
-    assert!(
-        config
-            .problems()
-            .iter()
-            .any(|problem| problem.contains("render-type")),
-        "{:?}",
-        config.problems()
-    );
-}
+    #[test]
+    fn an_unknown_render_type_is_reported() {
+        let config =
+            Config::parse("scoreboard:\n  enabled: true\n  render-type: pixels\n").expect("valid");
+        assert!(
+            config
+                .problems()
+                .iter()
+                .any(|problem| problem.contains("render-type")),
+            "{:?}",
+            config.problems()
+        );
+    }
 
-/// The shipped config has no `scoreboard:` section.
-///
-/// It still ships off by default, but the reason has changed and this test records
-/// the new one. Each viewer now has their own board, so every placeholder in a
-/// `lines:` entry resolves against them and there is no longer anything a shipped
-/// sidebar could show as literal text. It stays opt-in because a sidebar that
-/// appears on an existing server unasked is not a welcome surprise, not because
-/// placeholders in it would be broken.
-///
-/// A shipped sidebar **with** per-player placeholders would now be a good default,
-/// and is left as the next thing to decide rather than being ruled out here.
-#[test]
-fn the_shipped_config_ships_no_sidebar_and_that_is_deliberate() {
-    let config = Config::parse(DEFAULT_CONFIG).expect("valid");
-    assert!(
-        !config.scoreboard.enabled,
-        "the sidebar stays opt-in, so an existing server does not grow one unasked"
-    );
+    /// The shipped config has no `scoreboard:` section.
+    ///
+    /// It still ships off by default, but the reason has changed and this test records
+    /// the new one. Each viewer now has their own board, so every placeholder in a
+    /// `lines:` entry resolves against them and there is no longer anything a shipped
+    /// sidebar could show as literal text. It stays opt-in because a sidebar that
+    /// appears on an existing server unasked is not a welcome surprise, not because
+    /// placeholders in it would be broken.
+    ///
+    /// A shipped sidebar **with** per-player placeholders would now be a good default,
+    /// and is left as the next thing to decide rather than being ruled out here.
+    #[test]
+    fn the_shipped_config_ships_no_sidebar_and_that_is_deliberate() {
+        let config = Config::parse(DEFAULT_CONFIG).expect("valid");
+        assert!(
+            !config.scoreboard.enabled,
+            "the sidebar stays opt-in, so an existing server does not grow one unasked"
+        );
 
-    // A `Config` with no `scoreboard:` key is valid, and must not be reported as
-    // a problem.
-    assert!(
-        config.problems().iter().all(|p| !p.contains("scoreboard")),
-        "{:?}",
-        config.problems()
-    );
+        // A `Config` with no `scoreboard:` key is valid, and must not be reported as
+        // a problem.
+        assert!(
+            config.problems().iter().all(|p| !p.contains("scoreboard")),
+            "{:?}",
+            config.problems()
+        );
 
-    // The rest of the shipped config is unaffected - this guards the section's
-    // removal, not the sidebar itself.
-    assert!(config.header_footer.enabled);
-    assert!(config.tab_list.enabled);
-    assert!(config.refresh_ticks() > 0);
-}
+        // The rest of the shipped config is unaffected - this guards the section's
+        // removal, not the sidebar itself.
+        assert!(config.header_footer.enabled);
+        assert!(config.tab_list.enabled);
+        assert!(config.refresh_ticks() > 0);
+    }
 
-/// Turning one on by hand still works and is not reported as a problem.
-#[test]
-fn a_sidebar_can_still_be_switched_on_by_hand() {
-    let config = Config::parse(
+    /// Turning one on by hand still works and is not reported as a problem.
+    #[test]
+    fn a_sidebar_can_still_be_switched_on_by_hand() {
+        let config = Config::parse(
         "groups: [default]\n\
          scoreboard:\n  enabled: true\n  title: '%server_name%'\n  lines:\n    - 'online %online%'\n",
     )
     .expect("valid");
-    assert!(config.scoreboard.enabled);
-    assert_eq!(config.scoreboard.lines, ["online %online%"]);
-    assert!(
-        config.problems().iter().all(|p| !p.contains("scoreboard")),
-        "a hand-written sidebar is legitimate and must not be reported: {:?}",
-        config.problems()
-    );
-}
-
-/// The shipped tab format works with or without the permission plugin.
-///
-/// `%perm_prefix%` needs PumpkinPerm and PumpkinPIE, and an optional plugin that
-/// is not installed is not a typo. `autohide` removes it when nothing answers it,
-/// so a server with neither reads `blockrnc` rather than a literal
-/// `%perm_prefix%`.
-///
-/// That is the one placeholder hidden rather than left as written. Every other
-/// unresolved placeholder is still left on screen, because a typo has to be
-/// visible - and the log line naming `%perm_prefix%` unanswered is what points at
-/// a missing plugin rather than a spelling mistake.
-#[test]
-fn the_shipped_tab_format_works_with_or_without_the_permission_plugin() {
-    let config = Config::parse(DEFAULT_CONFIG).expect("valid");
-    assert!(
-        config.tab_list.format.contains("%player%"),
-        "a tab entry that loses its name to a missing optional plugin is worse than no \
-         prefix: {}",
-        config.tab_list.format
-    );
-    // The shipped format carries the prefix, so the key is not a separate feature
-    // the admin has to find.
-    assert!(
-        config.tab_list.format.contains("%perm_prefix%"),
-        "the shipped format should carry the prefix, because it blanks when nothing \
-         answers it"
-    );
-    // And the shipped `autohide` really does cover the prefix the format asks
-    // for. Compared through the renderer rather than as a string, because the
-    // config spells it `%perm_prefix%` and the built-in default is `perm_prefix`;
-    // both are the same entry, and what matters is that the shipped pair works
-    // together on a server with neither plugin installed.
-    let format = config.tab_list.format.clone();
-    let unresolved = format.clone();
-    assert_eq!(
-        crate::render::hide_unresolved(&unresolved, &config.tab_list.autohide),
-        "%player%",
-        "the shipped format and autohide must leave a bare name behind"
-    );
-}
-
-/// The key defaults to on rather than off, because `serde`'s `#[serde(default)]`
-/// would use `false`, and a config that never wrote it would otherwise start
-/// showing the literal placeholder.
-#[test]
-fn a_config_written_before_autohide_still_hides_the_prefix() {
-    let config = Config::parse(
-        "groups: [default]\ntab-list:\n  format: '%perm_prefix%%player%'\n",
-    )
-    .expect("valid");
-    assert_eq!(
-        config.tab_list.autohide,
-        ["perm_prefix"],
-        "configs written before the key existed must not start showing the literal \
-         placeholder"
-    );
-    // And the old spelling is accepted rather than refused under
-    // `deny_unknown_fields`, so a config written for the earlier key still loads.
-    let older = Config::parse(
-        "groups: [default]\ntab-list:\n  format: '%player%'\n  prefix-optional: false\n",
-    )
-    .expect("valid");
-    assert_eq!(older.tab_list.prefix_optional, Some(false));
-}
-
-/// At the default 1000 ms refresh a 100 ms animation of 14 frames advances 10
-/// frames per refresh, so only 7 are ever drawn. That is the stuttering-bar
-/// bug, and it has to be reported rather than discovered in game.
-#[test]
-fn a_partly_visible_animation_is_reported() {
-    let frames: Vec<String> = (0..14).map(|_| "    - 'x'".to_string()).collect();
-    let config = Config::parse(&format!(
-        "refresh-interval-ticks: 20\nanimations:\n  logo:\n    change-interval: 100\n    texts:\n{}\n",
-        frames.join("\n")
-    ))
-    .expect("valid");
-    assert!(
-        config
-            .problems()
-            .iter()
-            .any(|problem| problem.contains("only 7 of its 14")),
-        "{:?}",
-        config.problems()
-    );
-}
-
-/// Five frames at 100 ms against a 1000 ms refresh walks a clean step of 10
-/// modulo 5, which is zero, so the client sees frame 0 forever.
-#[test]
-fn an_animation_that_never_moves_is_reported() {
-    let frames: Vec<String> = (0..5).map(|_| "    - 'x'".to_string()).collect();
-    let config = Config::parse(&format!(
-        "refresh-interval-ticks: 20\nanimations:\n  logo:\n    change-interval: 100\n    texts:\n{}\n",
-        frames.join("\n")
-    ))
-    .expect("valid");
-    assert!(
-        config
-            .problems()
-            .iter()
-            .any(|problem| problem.contains("only 1 of its 5")),
-        "{:?}",
-        config.problems()
-    );
-}
-
-/// One frame per refresh is the only setting that always shows every frame.
-#[test]
-fn one_frame_per_refresh_shows_everything() {
-    assert_eq!(aliased_frames(1000, 7, 20), None);
-    assert_eq!(aliased_frames(1000, 14, 20), None);
-    assert_eq!(aliased_frames(100, 7, 2), None);
-}
-
-/// The shipped logo is one frame per refresh, so it steps smoothly.
-#[test]
-fn the_shipped_animations_do_not_skip_frames() {
-    let config = Config::parse(DEFAULT_CONFIG).expect("valid");
-    for (name, animation) in &config.animations {
-        assert_eq!(
-            aliased_frames(
-                animation.change_interval,
-                animation.texts.len(),
-                config.refresh_ticks()
-            ),
-            None,
-            "animation '{name}' skips frames"
+        assert!(config.scoreboard.enabled);
+        assert_eq!(config.scoreboard.lines, ["online %online%"]);
+        assert!(
+            config.problems().iter().all(|p| !p.contains("scoreboard")),
+            "a hand-written sidebar is legitimate and must not be reported: {:?}",
+            config.problems()
         );
     }
-}
 
-#[test]
-fn frames_advance_on_their_own_clock() {
-    let animation = Animation {
-        change_interval: 100,
-        texts: vec!["a".into(), "b".into(), "c".into()],
-    };
-    assert_eq!(animation.frame_at(0), Some("a"));
-    assert_eq!(animation.frame_at(99), Some("a"));
-    assert_eq!(animation.frame_at(100), Some("b"));
-    assert_eq!(animation.frame_at(299), Some("c"));
-    assert_eq!(animation.frame_at(300), Some("a"));
-}
+    /// The shipped tab format works with or without the permission plugin.
+    ///
+    /// `%perm_prefix%` needs PumpkinPerm and PumpkinPIE, and an optional plugin that
+    /// is not installed is not a typo. `autohide` removes it when nothing answers it,
+    /// so a server with neither reads `blockrnc` rather than a literal
+    /// `%perm_prefix%`.
+    ///
+    /// That is the one placeholder hidden rather than left as written. Every other
+    /// unresolved placeholder is still left on screen, because a typo has to be
+    /// visible - and the log line naming `%perm_prefix%` unanswered is what points at
+    /// a missing plugin rather than a spelling mistake.
+    #[test]
+    fn the_shipped_tab_format_works_with_or_without_the_permission_plugin() {
+        let config = Config::parse(DEFAULT_CONFIG).expect("valid");
+        assert!(
+            config.tab_list.format.contains("%player%"),
+            "a tab entry that loses its name to a missing optional plugin is worse than no \
+         prefix: {}",
+            config.tab_list.format
+        );
+        // The shipped format carries the prefix, so the key is not a separate feature
+        // the admin has to find.
+        assert!(
+            config.tab_list.format.contains("%perm_prefix%"),
+            "the shipped format should carry the prefix, because it blanks when nothing \
+         answers it"
+        );
+        // And the shipped `autohide` really does cover the prefix the format asks
+        // for. Compared through the renderer rather than as a string, because the
+        // config spells it `%perm_prefix%` and the built-in default is `perm_prefix`;
+        // both are the same entry, and what matters is that the shipped pair works
+        // together on a server with neither plugin installed.
+        let format = config.tab_list.format.clone();
+        let unresolved = format.clone();
+        assert_eq!(
+            crate::render::hide_unresolved(&unresolved, &config.tab_list.autohide),
+            "%player%",
+            "the shipped format and autohide must leave a bare name behind"
+        );
+    }
 
-/// An animation faster than the refresh loop skips frames rather than being
-/// slowed to match, which is why the clock is wall time and not ticks.
-#[test]
-fn a_fast_animation_still_advances() {
-    let animation = Animation {
-        change_interval: 1,
-        texts: vec!["a".into(), "b".into()],
-    };
-    assert_eq!(animation.frame_at(0), Some("a"));
-    assert_eq!(animation.frame_at(1), Some("b"));
-    assert_eq!(animation.frame_at(20), Some("a"));
-}
+    /// The key defaults to on rather than off, because `serde`'s `#[serde(default)]`
+    /// would use `false`, and a config that never wrote it would otherwise start
+    /// showing the literal placeholder.
+    #[test]
+    fn a_config_written_before_autohide_still_hides_the_prefix() {
+        let config =
+            Config::parse("groups: [default]\ntab-list:\n  format: '%perm_prefix%%player%'\n")
+                .expect("valid");
+        assert_eq!(
+            config.tab_list.autohide,
+            ["perm_prefix"],
+            "configs written before the key existed must not start showing the literal \
+         placeholder"
+        );
+        // And the old spelling is accepted rather than refused under
+        // `deny_unknown_fields`, so a config written for the earlier key still loads.
+        let older = Config::parse(
+            "groups: [default]\ntab-list:\n  format: '%player%'\n  prefix-optional: false\n",
+        )
+        .expect("valid");
+        assert_eq!(older.tab_list.prefix_optional, Some(false));
+    }
 
-#[test]
-fn an_animation_with_no_frames_has_no_frame() {
-    let animation = Animation {
-        change_interval: 100,
-        texts: Vec::new(),
-    };
-    assert_eq!(animation.frame_at(0), None);
-    assert_eq!(animation.frame_at(12345), None);
-}
+    /// At the default 1000 ms refresh a 100 ms animation of 14 frames advances 10
+    /// frames per refresh, so only 7 are ever drawn. That is the stuttering-bar
+    /// bug, and it has to be reported rather than discovered in game.
+    #[test]
+    fn a_partly_visible_animation_is_reported() {
+        let frames: Vec<String> = (0..14).map(|_| "    - 'x'".to_string()).collect();
+        let config = Config::parse(&format!(
+        "refresh-interval-ticks: 20\nanimations:\n  logo:\n    change-interval: 100\n    texts:\n{}\n",
+        frames.join("\n")
+    ))
+    .expect("valid");
+        assert!(
+            config
+                .problems()
+                .iter()
+                .any(|problem| problem.contains("only 7 of its 14")),
+            "{:?}",
+            config.problems()
+        );
+    }
 
-#[test]
-fn world_gates_match_without_regard_to_case() {
-    let header = HeaderFooter {
-        disabled_worlds: vec!["Lobby".to_string()],
-        ..HeaderFooter::default()
-    };
-    assert!(!header.applies_in("lobby"));
-    assert!(!header.applies_in("LOBBY"));
-    assert!(header.applies_in("world"));
-}
+    /// Five frames at 100 ms against a 1000 ms refresh walks a clean step of 10
+    /// modulo 5, which is zero, so the client sees frame 0 forever.
+    #[test]
+    fn an_animation_that_never_moves_is_reported() {
+        let frames: Vec<String> = (0..5).map(|_| "    - 'x'".to_string()).collect();
+        let config = Config::parse(&format!(
+        "refresh-interval-ticks: 20\nanimations:\n  logo:\n    change-interval: 100\n    texts:\n{}\n",
+        frames.join("\n")
+    ))
+    .expect("valid");
+        assert!(
+            config
+                .problems()
+                .iter()
+                .any(|problem| problem.contains("only 1 of its 5")),
+            "{:?}",
+            config.problems()
+        );
+    }
 
-#[test]
-fn a_disabled_section_applies_nowhere() {
-    let header = HeaderFooter {
-        enabled: false,
-        ..HeaderFooter::default()
-    };
-    assert!(!header.applies_in("world"));
-}
+    /// One frame per refresh is the only setting that always shows every frame.
+    #[test]
+    fn one_frame_per_refresh_shows_everything() {
+        assert_eq!(aliased_frames(1000, 7, 20), None);
+        assert_eq!(aliased_frames(1000, 14, 20), None);
+        assert_eq!(aliased_frames(100, 7, 2), None);
+    }
 
-#[test]
-fn a_bossbar_health_outside_the_range_is_reported() {
-    let bossbar = BossBar {
-        enabled: true,
-        health: 1.5,
-        ..BossBar::default()
-    };
-    assert!(bossbar.problem().unwrap().contains("0.0 to 1.0"));
-}
+    /// The shipped logo is one frame per refresh, so it steps smoothly.
+    #[test]
+    fn the_shipped_animations_do_not_skip_frames() {
+        let config = Config::parse(DEFAULT_CONFIG).expect("valid");
+        for (name, animation) in &config.animations {
+            assert_eq!(
+                aliased_frames(
+                    animation.change_interval,
+                    animation.texts.len(),
+                    config.refresh_ticks()
+                ),
+                None,
+                "animation '{name}' skips frames"
+            );
+        }
+    }
 
-#[test]
-fn an_unknown_division_is_reported() {
-    let bossbar = BossBar {
-        enabled: true,
-        division: "notches7".to_string(),
-        ..BossBar::default()
-    };
-    assert!(bossbar.problem().unwrap().contains("notches7"));
-}
+    #[test]
+    fn frames_advance_on_their_own_clock() {
+        let animation = Animation {
+            change_interval: 100,
+            texts: vec!["a".into(), "b".into(), "c".into()],
+        };
+        assert_eq!(animation.frame_at(0), Some("a"));
+        assert_eq!(animation.frame_at(99), Some("a"));
+        assert_eq!(animation.frame_at(100), Some("b"));
+        assert_eq!(animation.frame_at(299), Some("c"));
+        assert_eq!(animation.frame_at(300), Some("a"));
+    }
 
-#[test]
-fn a_disabled_bossbar_is_never_complained_about() {
-    let bossbar = BossBar {
-        enabled: false,
-        health: 99.0,
-        division: "nonsense".to_string(),
-        ..BossBar::default()
-    };
-    assert_eq!(bossbar.problem(), None);
-}
+    /// An animation faster than the refresh loop skips frames rather than being
+    /// slowed to match, which is why the clock is wall time and not ticks.
+    #[test]
+    fn a_fast_animation_still_advances() {
+        let animation = Animation {
+            change_interval: 1,
+            texts: vec!["a".into(), "b".into()],
+        };
+        assert_eq!(animation.frame_at(0), Some("a"));
+        assert_eq!(animation.frame_at(1), Some("b"));
+        assert_eq!(animation.frame_at(20), Some("a"));
+    }
 
-#[test]
-fn a_colour_template_resolving_to_a_colour_is_accepted() {
-    // This is the `%animation:barcolors%` case: the frame is a bare word.
-    let bossbar = BossBar {
-        enabled: true,
-        color: "red".to_string(),
-        ..BossBar::default()
-    };
-    assert_eq!(bossbar.colour_problem(), None);
-}
+    #[test]
+    fn an_animation_with_no_frames_has_no_frame() {
+        let animation = Animation {
+            change_interval: 100,
+            texts: Vec::new(),
+        };
+        assert_eq!(animation.frame_at(0), None);
+        assert_eq!(animation.frame_at(12345), None);
+    }
 
-#[test]
-fn a_colour_template_resolving_to_display_text_is_reported() {
-    let bossbar = BossBar {
-        enabled: true,
-        color: "&cRed".to_string(),
-        ..BossBar::default()
-    };
-    assert!(bossbar.colour_problem().unwrap().contains("not a bossbar colour"));
-}
+    #[test]
+    fn world_gates_match_without_regard_to_case() {
+        let header = HeaderFooter {
+            disabled_worlds: vec!["Lobby".to_string()],
+            ..HeaderFooter::default()
+        };
+        assert!(!header.applies_in("lobby"));
+        assert!(!header.applies_in("LOBBY"));
+        assert!(header.applies_in("world"));
+    }
 
-#[test]
-fn op_levels_use_kebab_case_keys() {
-    let config = Config::parse("groups: [a]\nop-level-groups:\n  two: a\n").expect("valid");
-    let level = config.op_level_groups.keys().next().expect("one mapping");
-    assert_eq!(*level, MinOpLevel::Two);
-    assert_eq!(level.as_u8(), 2);
-    assert!(config.to_yaml().unwrap().contains("two: a"));
-}
+    #[test]
+    fn a_disabled_section_applies_nowhere() {
+        let header = HeaderFooter {
+            enabled: false,
+            ..HeaderFooter::default()
+        };
+        assert!(!header.applies_in("world"));
+    }
 
-/// A warning that says `One` when the key is `one` sends the admin looking for
-/// a word that is not in the file.
-#[test]
-fn an_op_level_names_itself_the_way_the_config_writes_it() {
-    assert_eq!(MinOpLevel::Zero.as_str(), "zero");
-    assert_eq!(MinOpLevel::One.as_str(), "one");
-    assert_eq!(MinOpLevel::Two.as_str(), "two");
-    assert_eq!(MinOpLevel::Three.as_str(), "three");
-    assert_eq!(MinOpLevel::Four.as_str(), "four");
-}
+    #[test]
+    fn a_bossbar_health_outside_the_range_is_reported() {
+        let bossbar = BossBar {
+            enabled: true,
+            health: 1.5,
+            ..BossBar::default()
+        };
+        assert!(bossbar.problem().unwrap().contains("0.0 to 1.0"));
+    }
 
-#[test]
-fn an_unlisted_op_level_group_is_named_the_way_the_config_writes_it() {
-    let config = Config::parse("groups: [vip]\nop-level-groups:\n  one: ghost\n").expect("valid");
-    assert!(
-        config
-            .problems()
+    #[test]
+    fn an_unknown_division_is_reported() {
+        let bossbar = BossBar {
+            enabled: true,
+            division: "notches7".to_string(),
+            ..BossBar::default()
+        };
+        assert!(bossbar.problem().unwrap().contains("notches7"));
+    }
+
+    #[test]
+    fn a_disabled_bossbar_is_never_complained_about() {
+        let bossbar = BossBar {
+            enabled: false,
+            health: 99.0,
+            division: "nonsense".to_string(),
+            ..BossBar::default()
+        };
+        assert_eq!(bossbar.problem(), None);
+    }
+
+    #[test]
+    fn a_colour_template_resolving_to_a_colour_is_accepted() {
+        // This is the `%animation:barcolors%` case: the frame is a bare word.
+        let bossbar = BossBar {
+            enabled: true,
+            color: "red".to_string(),
+            ..BossBar::default()
+        };
+        assert_eq!(bossbar.colour_problem(), None);
+    }
+
+    #[test]
+    fn a_colour_template_resolving_to_display_text_is_reported() {
+        let bossbar = BossBar {
+            enabled: true,
+            color: "&cRed".to_string(),
+            ..BossBar::default()
+        };
+        assert!(
+            bossbar
+                .colour_problem()
+                .unwrap()
+                .contains("not a bossbar colour")
+        );
+    }
+
+    #[test]
+    fn op_levels_use_kebab_case_keys() {
+        let config = Config::parse("groups: [a]\nop-level-groups:\n  two: a\n").expect("valid");
+        let level = config.op_level_groups.keys().next().expect("one mapping");
+        assert_eq!(*level, MinOpLevel::Two);
+        assert_eq!(level.as_u8(), 2);
+        assert!(config.to_yaml().unwrap().contains("two: a"));
+    }
+
+    /// A warning that says `One` when the key is `one` sends the admin looking for
+    /// a word that is not in the file.
+    #[test]
+    fn an_op_level_names_itself_the_way_the_config_writes_it() {
+        assert_eq!(MinOpLevel::Zero.as_str(), "zero");
+        assert_eq!(MinOpLevel::One.as_str(), "one");
+        assert_eq!(MinOpLevel::Two.as_str(), "two");
+        assert_eq!(MinOpLevel::Three.as_str(), "three");
+        assert_eq!(MinOpLevel::Four.as_str(), "four");
+    }
+
+    #[test]
+    fn an_unlisted_op_level_group_is_named_the_way_the_config_writes_it() {
+        let config =
+            Config::parse("groups: [vip]\nop-level-groups:\n  one: ghost\n").expect("valid");
+        assert!(
+            config
+                .problems()
+                .iter()
+                .any(|problem| problem.contains("op level one to 'ghost'")),
+            "{:?}",
+            config.problems()
+        );
+    }
+
+    /// A colour spelled slightly wrong renders as literal text, which on a
+    /// sidebar looks like a styling choice rather than a mistake.
+    /// Past 99 the two-digit entry name repeats, so two lines would share a key.
+    #[test]
+    fn more_lines_than_can_be_given_a_row_is_reported() {
+        let lines: Vec<String> = (0..=MAX_LINES).map(|_| "'x'".to_string()).collect();
+        let config =
+            Config::parse(&format!("scoreboard:\n  lines:\n{}", indent(&lines))).expect("valid");
+        assert!(
+            config
+                .problems()
+                .iter()
+                .any(|problem| problem.contains(&format!("at most {MAX_LINES}"))),
+            "{:?}",
+            config.problems()
+        );
+    }
+
+    /// A client draws 15 and drops the rest without saying so.
+    #[test]
+    fn more_lines_than_a_client_shows_is_reported() {
+        let lines: Vec<String> = (0..20).map(|_| "'x'".to_string()).collect();
+        let config =
+            Config::parse(&format!("scoreboard:\n  lines:\n{}", indent(&lines))).expect("valid");
+        assert!(
+            config
+                .problems()
+                .iter()
+                .any(|problem| problem.contains("only shows the top")),
+            "{:?}",
+            config.problems()
+        );
+    }
+
+    fn indent(lines: &[String]) -> String {
+        lines
             .iter()
-            .any(|problem| problem.contains("op level one to 'ghost'")),
-        "{:?}",
-        config.problems()
-    );
-}
+            .map(|line| format!("    - {line}\n"))
+            .collect::<String>()
+    }
 
-/// A colour spelled slightly wrong renders as literal text, which on a
-/// sidebar looks like a styling choice rather than a mistake.
-/// Past 99 the two-digit entry name repeats, so two lines would share a key.
-#[test]
-fn more_lines_than_can_be_given_a_row_is_reported() {
-    let lines: Vec<String> = (0..=MAX_LINES).map(|_| "'x'".to_string()).collect();
-    let config = Config::parse(&format!("scoreboard:\n  lines:\n{}", indent(&lines))).expect("valid");
-    assert!(
-        config
+    #[test]
+    fn a_mistyped_tag_is_reported_with_where_it_is() {
+        let config =
+            Config::parse("scoreboard:\n  lines:\n    - '<gray8>Europe'\n").expect("valid");
+        assert!(
+            config
+                .problems()
+                .iter()
+                .any(|problem| problem.contains("scoreboard.lines") && problem.contains("<gray8>")),
+            "{:?}",
+            config.problems()
+        );
+    }
+
+    #[test]
+    fn the_shipped_config_has_no_bad_tag() {
+        let config = Config::parse(DEFAULT_CONFIG).expect("valid");
+        let bad: Vec<String> = config
             .problems()
-            .iter()
-            .any(|problem| problem.contains(&format!("at most {MAX_LINES}"))),
-        "{:?}",
-        config.problems()
-    );
-}
+            .into_iter()
+            .filter(|problem| problem.contains("is not a tag"))
+            .collect();
+        assert!(bad.is_empty(), "{bad:#?}");
+    }
 
-/// A client draws 15 and drops the rest without saying so.
-#[test]
-fn more_lines_than_a_client_shows_is_reported() {
-    let lines: Vec<String> = (0..20).map(|_| "'x'".to_string()).collect();
-    let config = Config::parse(&format!("scoreboard:\n  lines:\n{}", indent(&lines))).expect("valid");
-    assert!(
-        config
-            .problems()
-            .iter()
-            .any(|problem| problem.contains("only shows the top")),
-        "{:?}",
-        config.problems()
-    );
-}
-
-fn indent(lines: &[String]) -> String {
-    lines
-        .iter()
-        .map(|line| format!("    - {line}\n"))
-        .collect::<String>()
-}
-
-#[test]
-fn a_mistyped_tag_is_reported_with_where_it_is() {
-    let config = Config::parse("scoreboard:\n  lines:\n    - '<gray8>Europe'\n").expect("valid");
-    assert!(
-        config
-            .problems()
-            .iter()
-            .any(|problem| problem.contains("scoreboard.lines")
-                && problem.contains("<gray8>")),
-        "{:?}",
-        config.problems()
-    );
-}
-
-#[test]
-fn the_shipped_config_has_no_bad_tag() {
-    let config = Config::parse(DEFAULT_CONFIG).expect("valid");
-    let bad: Vec<String> = config
-        .problems()
-        .into_iter()
-        .filter(|problem| problem.contains("is not a tag"))
-        .collect();
-    assert!(bad.is_empty(), "{bad:#?}");
-}
-
-/// A template added to the config and left out of `templates()` would have its
-/// typos go unreported, which is the whole failure this list prevents.
-#[test]
-fn every_section_that_holds_a_template_is_covered() {
-    let config = Config::parse(
-        "header-footer:\n  header: ['<nope1>']\n  footer: ['<nope2>']\n\
+    /// A template added to the config and left out of `templates()` would have its
+    /// typos go unreported, which is the whole failure this list prevents.
+    #[test]
+    fn every_section_that_holds_a_template_is_covered() {
+        let config = Config::parse(
+            "header-footer:\n  header: ['<nope1>']\n  footer: ['<nope2>']\n\
              tab-list:\n  format: '<nope3>'\n\
              bossbar:\n  enabled: true\n  title: '<nope4>'\n\
              scoreboard:\n  title: '<nope5>'\n  entry: '<nope6>'\n  lines: ['<nope7>']\n\
              animations:\n  a:\n    change-interval: 100\n    texts: ['<nope8>']\n",
-    )
-    .expect("valid");
-    let reported: Vec<String> = config
-        .problems()
-        .into_iter()
-        .filter(|problem| problem.contains("is not a tag"))
-        .collect();
-    for index in 1..=8 {
+        )
+        .expect("valid");
+        let reported: Vec<String> = config
+            .problems()
+            .into_iter()
+            .filter(|problem| problem.contains("is not a tag"))
+            .collect();
+        for index in 1..=8 {
+            assert!(
+                reported
+                    .iter()
+                    .any(|problem| problem.contains(&format!("<nope{index}>"))),
+                "nope{index} was not reported: {reported:#?}"
+            );
+        }
+    }
+
+    /// The section is shipped, and every condition in it is referenced by the shipped
+    /// text. An unreferenced one is dead config, and a default that grows a new
+    /// condition has to grow the `%condition:` call that uses it too, so neither half
+    /// can drift.
+    #[test]
+    fn every_shipped_condition_is_used_and_answers_both_ways() {
+        let config = Config::parse(DEFAULT_CONFIG).expect("valid");
+        for (name, condition) in &config.conditions {
+            let placeholder = format!("%condition:{name}%");
+            assert!(
+                config
+                    .templates()
+                    .iter()
+                    .any(|(_, template)| template.contains(&placeholder)),
+                "{placeholder} is defined but nothing renders it"
+            );
+            assert!(
+                config.problems().is_empty(),
+                "the shipped {placeholder} does not resolve: {:?}",
+                config.problems()
+            );
+            assert!(
+                condition.when_true.trim() != condition.when_false.trim(),
+                "{placeholder} says the same thing either way, so it is not a condition"
+            );
+        }
+        // And it is documented where an admin will actually be looking. Matched
+        // without the surrounding punctuation on purpose: this is about the name being
+        // findable, not about how this file happens to typeset it, so rewording a
+        // comment cannot fail a build.
         assert!(
-            reported.iter().any(|problem| problem.contains(&format!("<nope{index}>"))),
-            "nope{index} was not reported: {reported:#?}"
+            DEFAULT_CONFIG.contains("%condition:<name>%"),
+            "the shipped file must still name the placeholder that reaches the section"
         );
     }
-}
 
-/// The section is shipped, and every condition in it is referenced by the shipped
-/// text. An unreferenced one is dead config, and a default that grows a new
-/// condition has to grow the `%condition:` call that uses it too, so neither half
-/// can drift.
-#[test]
-fn every_shipped_condition_is_used_and_answers_both_ways() {
-    let config = Config::parse(DEFAULT_CONFIG).expect("valid");
-    for (name, condition) in &config.conditions {
-        let placeholder = format!("%condition:{name}%");
-        assert!(
-            config.templates().iter().any(|(_, template)| template.contains(&placeholder)),
-            "{placeholder} is defined but nothing renders it"
-        );
-        assert!(
-            config.problems().is_empty(),
-            "the shipped {placeholder} does not resolve: {:?}",
-            config.problems()
-        );
-        assert!(
-            condition.when_true.trim() != condition.when_false.trim(),
-            "{placeholder} says the same thing either way, so it is not a condition"
-        );
-    }
-    // And it is documented where an admin will actually be looking. Matched
-    // without the surrounding punctuation on purpose: this is about the name being
-    // findable, not about how this file happens to typeset it, so rewording a
-    // comment cannot fail a build.
-    assert!(
-        DEFAULT_CONFIG.contains("%condition:<name>%"),
-        "the shipped file must still name the placeholder that reaches the section"
-    );
-}
-
-/// TAB's own example, parsed. The engine is exercised by `render`'s tests
-/// through `compile` and `evaluate`; this is the wiring - that a block written
-/// the way TAB writes it reaches [`Config::conditions`] and is *not* reported
-/// as a problem, which is the only way a dangling reference could hide here.
-#[test]
-fn tabs_own_condition_example_parses_and_is_not_reported() {
-    let config = Config::parse(
+    /// TAB's own example, parsed. The engine is exercised by `render`'s tests
+    /// through `compile` and `evaluate`; this is the wiring - that a block written
+    /// the way TAB writes it reaches [`Config::conditions`] and is *not* reported
+    /// as a problem, which is the only way a dangling reference could hide here.
+    #[test]
+    fn tabs_own_condition_example_parses_and_is_not_reported() {
+        let config = Config::parse(
         "conditions:\n  low_ping:\n    conditions:\n      - '%ping%<50'\n    true: '&a%ping%ms'\n    \
              false: '&c%ping%ms'\ntab-list:\n  format: '%condition:low_ping%'\n",
     )
     .expect("valid");
-    assert!(config.conditions.contains_key("low_ping"));
-    let reported: Vec<String> = config
-        .problems()
-        .into_iter()
-        .filter(|problem| problem.contains("is not a condition"))
-        .collect();
-    assert!(reported.is_empty(), "{reported:#?}");
-}
-
-/// The inverse, which is the whole reason the check exists: a condition
-/// referenced but never defined is left on screen looking exactly like any
-/// other typo, and the section that would explain it may be far away.
-#[test]
-fn a_condition_that_is_referenced_but_not_defined_is_reported() {
-    let config = Config::parse("tab-list:\n  format: '%condition:low_ping%'\n").expect("valid");
-    assert!(
-        config
+        assert!(config.conditions.contains_key("low_ping"));
+        let reported: Vec<String> = config
             .problems()
-            .iter()
-            .any(|problem| problem.contains("%condition:low_ping%") && problem.contains("is not a condition")),
-        "{:#?}",
-        config.problems()
-    );
-}
+            .into_iter()
+            .filter(|problem| problem.contains("is not a condition"))
+            .collect();
+        assert!(reported.is_empty(), "{reported:#?}");
+    }
+
+    /// The inverse, which is the whole reason the check exists: a condition
+    /// referenced but never defined is left on screen looking exactly like any
+    /// other typo, and the section that would explain it may be far away.
+    #[test]
+    fn a_condition_that_is_referenced_but_not_defined_is_reported() {
+        let config = Config::parse("tab-list:\n  format: '%condition:low_ping%'\n").expect("valid");
+        assert!(
+            config
+                .problems()
+                .iter()
+                .any(|problem| problem.contains("%condition:low_ping%")
+                    && problem.contains("is not a condition")),
+            "{:#?}",
+            config.problems()
+        );
+    }
 }

@@ -84,9 +84,7 @@ fn config_slot() -> &'static Mutex<Option<Arc<Config>>> {
 /// reason this plugin has no `catch_unwind` anywhere.
 ///
 /// `pub(crate)` so the same reasoning is written once rather than twice that drift.
-pub(crate) fn recover<T>(
-    result: std::sync::LockResult<MutexGuard<'_, T>>,
-) -> MutexGuard<'_, T> {
+pub(crate) fn recover<T>(result: std::sync::LockResult<MutexGuard<'_, T>>) -> MutexGuard<'_, T> {
     match result {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
