@@ -51,21 +51,23 @@ jobs:
         shell: pwsh
         run: tools/check-wit.ps1
 
-      - name: Install the wasm32-wasip2 target
-        run: rustup target add wasm32-wasip2
+      - name: Install Rust and the wasm32-wasip3 target
+        run: rustup show
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: PumpkinTAB -> target
 
-      - name: Test
-        run: cargo test
+      - run: cargo fetch --locked
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --offline --all-targets -- -D warnings
+      - run: cargo test --locked --offline
 
       - name: Build
-        run: cargo build --release --target wasm32-wasip2
+        run: cargo build --locked --offline --release --target wasm32-wasip3
 
       - name: Upload the component
         uses: actions/upload-artifact@v4
         with:
           name: pumpkin-tab
-          path: target/wasm32-wasip2/release/pumpkin_tab.wasm
+          path: target/wasm32-wasip3/release/pumpkin_tab.wasm

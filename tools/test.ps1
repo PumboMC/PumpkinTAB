@@ -44,15 +44,15 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$artifact = Join-Path $repoRoot 'target\wasm32-wasip2\release\pumpkin_tab.wasm'
+$artifact = Join-Path $repoRoot 'target\wasm32-wasip3\release\pumpkin_tab.wasm'
 $target = Join-Path $ServerDir 'plugins\pumpkin_tab.wasm'
 $dataFolder = Join-Path $ServerDir 'plugins\data\PumpkinTAB'
 
 if (-not $SkipBuild) {
-    Write-Host '==> cargo build --release --target wasm32-wasip2'
+    Write-Host '==> cargo build --release --target wasm32-wasip3'
     Push-Location $repoRoot
     try {
-        & cargo build --release --target wasm32-wasip2
+        & cargo build --release --target wasm32-wasip3
         if ($LASTEXITCODE -ne 0) { throw "the build failed with $LASTEXITCODE" }
     }
     finally { Pop-Location }

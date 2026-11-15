@@ -12,6 +12,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: tab-release
+  cancel-in-progress: false
+
 env:
   # The same WIT_TREE as ci.yml, and it has to agree. See the comments there
   # for why the version string is not enough and what the tree hash is.
@@ -31,18 +35,18 @@ jobs:
         shell: pwsh
         run: tools/check-wit.ps1
 
-      - name: Install the wasm32-wasip2 target
-        run: rustup target add wasm32-wasip2
+      - name: Install Rust and the wasm32-wasip3 target
+        run: rustup show
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: PumpkinTAB -> target
 
       - name: Test
-        run: cargo test
+        run: cargo test --locked
 
       - name: Build
-        run: cargo build --release --target wasm32-wasip2
+        run: cargo build --locked --offline --release --target wasm32-wasip3
 
       # The Market wants the version without a leading `v`, and the tag carries
       # one. `inputs.tag` takes priority because a `workflow_dispatch` run has no
@@ -55,6 +59,8 @@ jobs:
           $version = "${{ inputs.tag }}"
           if (-not $version) { $version = $env:GITHUB_REF_NAME }
           $version = $version -replace '^v', ''
+          $package = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object name -eq 'pumpkin-tab'
+          if ($version -ne $package.version) { throw "Release tag must match the plugin package version" }
           "value=$version" >> $env:GITHUB_OUTPUT
 
       # Attached bare rather than zipped: it is the only file that ships, and a
@@ -64,8 +70,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
-          files: target/wasm32-wasip2/release/pumpkin_tab.wasm
+          files: target/wasm32-wasip3/release/pumpkin_tab.wasm
           body: |
+            Rebuilt for wasm32-wasip3.
+
             Download `pumpkin_tab.wasm` and drop it into your server's
             `plugins` directory, next to `pumpkin_pie_plugin.wasm` and
             `pumpkin_perm.wasm` if you use them.
@@ -134,11 +142,8 @@ jobs:
         with:
           plugin-id: s2zRayDY
           version: ${{ steps.version.outputs.value }}
-          wasm-file: target/wasm32-wasip2/release/pumpkin_tab.wasm
+          wasm-file: target/wasm32-wasip3/release/pumpkin_tab.wasm
           api-token: ${{ secrets.MARKET_API_TOKEN }}
           track: stable
           release-notes: |
-            Bug fixes and stability improvements.
-
-            Built against `pumpkin-plugin-api` `${{ steps.wit.outputs.api }}`, plugin
-            WIT `${{ steps.wit.outputs.wit }}`.
+            Rebuilt for wasm32-wasip3.
