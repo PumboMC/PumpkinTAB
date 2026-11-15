@@ -13,3 +13,7 @@ API-AUDIT.md
 /nethernet-key.der
 /data/.pumpkin/
 /logs/
+/data/ops.json
+/data/whitelist.json
+/data/banned-players.json
+/data/banned-ips.json
